@@ -37,11 +37,10 @@ test('loadTrackFile fetches the local path and reports a missing file in Norwegi
  await assert.rejects(loadTrackFile(t,async()=>({ok:false})),/is unavailable/);
 });
 
-test('main.js: selection loads paused, only the explicit Play click autoplays, stop still cancels loads',()=>{
+test('main.js: song selection starts playback, reload stays paused, and stop cancels loads',()=>{
  const main=read('src/main.js'),html=read('index.html');
- assert.match(main,/\$\('track-select'\)\.onchange=[\s\S]*?loadLibraryTrack\(selection\)/);
- assert.doesNotMatch(main,/loadLibraryTrack\(e\.target\.value,\s*\{[^}]*autoplay:\s*true/);
- assert.equal([...main.matchAll(/autoplay:true/g)].length,1,'exactly one autoplay site (the Play button)');
+ assert.match(main,/\$\('track-select'\)\.onchange=[\s\S]*?loadLibraryTrack\(selection,\{autoplay:true\}\)/);
+ assert.equal([...main.matchAll(/autoplay:true/g)].length,2,'only song selection and the Play button start playback');
  assert.match(main,/async function toggleAudio[\s\S]*?loadLibraryTrack\(id,\{autoplay:true\}\)/);
  assert.match(main,/sound\.file\(file,\{autoplay:false,position:previous\.position\}\)/,'reload restores paused at the saved playhead');
  assert.match(main,/async function loadLibraryTrack[\s\S]*?const revision=\+\+audioRevision[\s\S]*?if\(revision!==audioRevision\)return false/);

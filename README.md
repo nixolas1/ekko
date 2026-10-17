@@ -54,7 +54,7 @@ Smoke mode uses a staggered velocity grid with a pressure solve, following the g
 
 ## Shareable settings
 
-The address updates as controls change. **Copy link** copies the current setup. Links override saved preferences only for parameters they contain; unrecognised/invalid values are ignored. Music always loads paused. Local file bytes and microphone access cannot be shared by URL.
+The address updates as controls change. **Copy link** copies the current setup. Links override saved preferences only for parameters they contain; unrecognised/invalid values are ignored. Opening a link or refreshing loads music paused. Selecting a song starts it immediately. Local file bytes and microphone access cannot be shared by URL.
 
 For example: `/?mode=fluid-ring&palette=3&song=mitis-endeavors&t=45&force=0.05&gain=2.8`.
 

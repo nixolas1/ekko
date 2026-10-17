@@ -84,7 +84,7 @@ function audioUI(){
   const loaded=file||youtube?sound.mode==='file':loadedTrack()===$('track-select').value;
   $('track-state').textContent=mic?'Live audio input':file||youtube?(audioSelection.name||'Audio file'):loaded?'Ready':'Choose a song';
   for(const link of document.querySelectorAll('[data-track-credit]'))link.hidden=mic||file||youtube||link.dataset.trackCredit!==$('track-select').value;
-  $('audio-source-note').textContent=youtube?'Import audio for full frequency response. Music opens paused.':mic?'Microphone sound drives the visuals. It is never played back or recorded.':file?'Your file stays on this device. Choose Audio file again to replace it.':'Choose a song, then press play. Music always opens paused.';
+  $('audio-source-note').textContent=youtube?'Import audio for full frequency response. Music opens paused.':mic?'Microphone sound drives the visuals. It is never played back or recorded.':file?'Your file stays on this device. Choose Audio file again to replace it.':'Choose a song to start playing. Opening or refreshing the page keeps music paused.';
 }
 // Library track currently held by the audio element, or null when another source (or nothing) is loaded.
 function loadedTrack(){return audioSelection.kind==='reference'&&sound.mode==='file'&&sound.element?audioSelection.track:null;}
@@ -95,7 +95,7 @@ function attachAudio(){
   for(const event of ['play','pause','seeked'])sound.element?.addEventListener(event,()=>{audioUI();persist();});
   audioUI();persist();
 }
-// Loads a library track. Only an explicit Play click passes autoplay; selection and reload always load paused.
+// Loads a library track. Explicit song selection and Play start playback; reload always loads paused.
 // Stop/demo/mic/upload bump audioRevision (and AudioInput's op), so a superseded load resolves false and stays silent.
 async function loadLibraryTrack(id,{autoplay=false,position=0}={}){
   const revision=++audioRevision,track=trackById(resolveTrackId(id));
@@ -117,7 +117,7 @@ $('microphone').onclick=()=>{if(audioSelection.kind==='mic')return;audioRevision
 $('library').onclick=async()=>{if(loadedTrack()===$('track-select').value)return;try{await loadLibraryTrack($('track-select').value);}catch(error){notice(error.message);}finally{audioUI();persist();}};
 $('track-select').onchange=async e=>{
   const selection=e.target.value;e.target.blur();pendingTrack=selection;persist();audioUI();
-  try{await loadLibraryTrack(selection);}catch(error){if(pendingTrack===selection&&loadedTrack())$('track-select').value=loadedTrack();notice(error.message);}finally{if(pendingTrack===selection)pendingTrack=null;audioUI();persist();}
+  try{await loadLibraryTrack(selection,{autoplay:true});}catch(error){if(pendingTrack===selection&&loadedTrack())$('track-select').value=loadedTrack();notice(error.message);}finally{if(pendingTrack===selection)pendingTrack=null;audioUI();persist();}
 };
 async function toggleAudio(){
   const id=$('track-select').value;
