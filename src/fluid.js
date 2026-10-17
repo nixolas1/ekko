@@ -6,7 +6,7 @@ export class FluidSmoke {
   constructor(engine){this.engine=engine;this.device=engine.device;this.textures=[];this.index=0;this.pressureIndex=0;}
   async init(){
     const module=await this.engine.module('fluid.wgsl',code);
-    const names=['advectVelocity','curl','confine','divergence','pressure','project','dyeForward','dyeBackward','dyeCorrect'];
+    const names=['advectVelocity','curl','confine','divergence','pressure','project','dyeForward','dyeBackward','dyeCorrect','advectLight','advectDetail'];
     this.pipelines=Object.fromEntries(await Promise.all(names.map(async entryPoint=>[entryPoint,await this.device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint}})])));
     this.render=await this.device.createRenderPipelineAsync({layout:'auto',vertex:{module,entryPoint:'fluidVertex'},fragment:{module,entryPoint:'fluidFragment',targets:[{format:'rgba16float'}]},primitive:{topology:'triangle-list'}});
   }
@@ -14,10 +14,11 @@ export class FluidSmoke {
     // Square world-space cells, bounded width on ultrawide displays.
     const h=192,w=Math.max(64,Math.min(512,Math.round(h*aspect/8)*8));
     if(!reset&&this.size?.[0]===w&&this.size?.[1]===h)return;
-    this.textures.forEach(t=>t.destroy());this.textures=[];this.size=[w,h];this.dyeSize=[w*4,h*4];this.index=0;this.pressureIndex=0;
+    this.textures.forEach(t=>t.destroy());this.textures=[];this.size=[w,h];this.dyeSize=[w*4,h*4];this.index=0;this.pressureIndex=0;this.detailReset=true;
     const make=(size,format)=>{const t=this.device.createTexture({size,format,usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.STORAGE_BINDING|GPUTextureUsage.COPY_SRC});this.textures.push(t);return {texture:t,view:t.createView()};};
     this.vel=Array.from({length:3},()=>make(this.size,'rgba16float'));
     this.dye=Array.from({length:4},()=>make(this.dyeSize,'rgba16float'));
+    this.light=Array.from({length:2},()=>make(this.dyeSize,'rgba16float'));
     this.pressure=Array.from({length:2},()=>make(this.size,'r32float'));
     this.div=make(this.size,'r32float');this.curl=make(this.size,'r32float');
     const group=(pipeline,items)=>this.device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:items.map(([binding,resource])=>({binding,resource}))});
@@ -33,7 +34,9 @@ export class FluidSmoke {
     this.groups.forward=this.dye.slice(0,2).map(d=>group(P.dyeForward,[U,[1,d.view],[2,this.vel[0].view],S,[6,this.dye[2].view]]));
     this.groups.backward=group(P.dyeBackward,[U,[1,this.dye[2].view],[2,this.vel[0].view],S,[6,this.dye[3].view]]);
     this.groups.correct=this.dye.slice(0,2).map((d,i)=>group(P.dyeCorrect,[U,[1,d.view],[2,this.vel[0].view],[3,this.dye[2].view],[4,this.dye[3].view],S,[6,this.dye[1-i].view]]));
-    this.groups.render=this.dye.slice(0,2).map(d=>group(this.render,[U,[1,d.view],S]));
+    this.groups.detail=group(P.advectDetail,[U,[2,this.vel[0].view],S,[8,{buffer:this.engine.buffer}]]);
+    this.groups.light=this.light.map((l,i)=>group(P.advectLight,[U,[1,l.view],[2,this.vel[0].view],S,[6,this.light[1-i].view]]));
+    this.groups.render=this.dye.slice(0,2).map((d,i)=>group(this.render,[U,[1,d.view],[3,this.light[i].view],S]));
   }
   dispatch(encoder,name,group,size=this.size){
     const pass=encoder.beginComputePass();pass.setPipeline(this.pipelines[name]);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(size[0]/8),Math.ceil(size[1]/8));pass.end();
@@ -47,7 +50,18 @@ export class FluidSmoke {
     this.dispatch(encoder,'dyeForward',g.forward[this.index],this.dyeSize);
     this.dispatch(encoder,'dyeBackward',g.backward,this.dyeSize);
     this.dispatch(encoder,'dyeCorrect',g.correct[this.index],this.dyeSize);
+    this.dispatch(encoder,'advectLight',g.light[this.index],this.dyeSize);
+    if(this.engine.flowMode===6){
+      if(this.detailReset){encoder.clearBuffer(this.engine.buffer,0,Math.min(this.engine.capacity,262144)*64);this.detailReset=false;}
+      const pass=encoder.beginComputePass();pass.setPipeline(this.pipelines.advectDetail);pass.setBindGroup(0,g.detail);pass.dispatchWorkgroups(Math.ceil(Math.min(this.engine.capacity,262144)/256));pass.end();
+    }
     this.index=1-this.index;
   }
-  draw(encoder,view){this.engine.screenPass(encoder,this.render,this.groups.render[this.index],view);}
+  draw(encoder,view){
+    this.engine.screenPass(encoder,this.render,this.groups.render[this.index],view);
+    if(this.engine.flowMode===6){
+      const pass=encoder.beginRenderPass({colorAttachments:[{view,loadOp:'load',storeOp:'store'}]});
+      pass.setPipeline(this.engine.referenceRender);pass.setBindGroup(0,this.engine.referenceRenderGroup);pass.draw(4,Math.min(this.engine.capacity,262144));pass.end();
+    }
+  }
 }

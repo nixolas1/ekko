@@ -1,4 +1,4 @@
-import { ANALYSER, AudioError, TransientDetector, checkAudioFile, demoFrame, followEnvelope, microphoneError, playbackError, requestMicrophone, resumeContext, sanitizeGain, softLimit, spectralLevels, emissionLevels, whenLoaded } from './audio-controls.js';
+import { ANALYSER, RingSpectrum, AudioError, TransientDetector, checkAudioFile, demoFrame, followEnvelope, microphoneError, playbackError, requestMicrophone, resumeContext, sanitizeGain, softLimit, spectralLevels, emissionLevels, whenLoaded } from './audio-controls.js';
 
 // Attack/release (seconds) per band: bass snaps up and lets go slowly, highs flicker faster.
 const ATTACK = [0.012, 0.015, 0.01, 0.014];
@@ -11,7 +11,7 @@ export class AudioInput {
   constructor(){
     this.mode='demo';this.gain=1.2;this.bands=[0,0,0,0];this.bins=new Uint8Array(512);
     this.emissionBands=new Float32Array(7);this._emissionRaw=new Float32Array(7);
-    this.transient=0;this.error=null;this.onchange=null;
+    this.ringSpectrum=new RingSpectrum();this.transient=0;this.error=null;this.onchange=null;
     this.ctx=null;this.element=null;this.stream=null;this.source=null;this.url=null;
     this._op=0;this._env=[0,0,0,0];this._levels=[0,0,0,0];this._detector=new TransientDetector();this._time=null;
   }
@@ -19,7 +19,7 @@ export class AudioInput {
   async context(resume=true){
     if(!this.ctx||this.ctx.state==='closed'){
       const Ctor=globalThis.AudioContext||globalThis.webkitAudioContext;
-      if(!Ctor)throw new AudioError('unsupported','nettleseren støtter ikke Web Audio');
+      if(!Ctor)throw new AudioError('unsupported','This browser does not support Web Audio.');
       const ctx=new Ctor({latencyHint:'interactive'});
       const analyser=ctx.createAnalyser();
       analyser.fftSize=ANALYSER.fftSize;analyser.smoothingTimeConstant=ANALYSER.smoothing;analyser.minDecibels=ANALYSER.minDb;analyser.maxDecibels=ANALYSER.maxDb;
@@ -41,7 +41,7 @@ export class AudioInput {
   }
   _setMode(mode,reason){
     const changed=this.mode!==mode;this.mode=mode;
-    this.emissionBands.fill(0);this._env.fill(0);this._levels.fill(0);this._detector.reset();this.transient=0;this._time=null;
+    this.ringSpectrum.reset();this.emissionBands.fill(0);this._env.fill(0);this._levels.fill(0);this._detector.reset();this.transient=0;this._time=null;
     if(changed&&this.onchange){try{this.onchange(mode,reason);}catch{}}
   }
   // Source died by itself (unplugged device, decode error): fall back to demo and say why.
@@ -63,7 +63,7 @@ export class AudioInput {
       try{source=ctx.createMediaStreamSource(stream);}catch(error){stream.getTracks().forEach(t=>t.stop());throw microphoneError(error);}
       this._release();
       this.stream=stream;this.source=source;source.connect(this.analyser);
-      stream.getTracks().forEach(t=>{t.onended=()=>{if(this.stream===stream)this._fail('Mikrofonen ble frakoblet');};});
+      stream.getTracks().forEach(t=>{t.onended=()=>{if(this.stream===stream)this._fail('The microphone disconnected');};});
       this.error=null;this._setMode('mic');
       return true;
     }catch(error){if(op!==this._op)return false;this.error=error.message;throw error;}
@@ -83,7 +83,7 @@ export class AudioInput {
       this._release();
       this.element=element;this.url=url;this.source=source;
       source.connect(this.analyser);source.connect(ctx.destination);
-      element.onerror=()=>{if(this.element===element)this._fail('Lydfilen kunne ikke spilles videre');};
+      element.onerror=()=>{if(this.element===element)this._fail('Audio playback failed.');};
       if(Number.isFinite(position)&&position>0)element.currentTime=Math.min(position,Number.isFinite(element.duration)?Math.max(0,element.duration-.01):position);
       if(autoplay)await element.play();
       if(op!==this._op)return false;
@@ -110,9 +110,10 @@ export class AudioInput {
       for(let i=0;i<4;i++)this._env[i]=followEnvelope(this._env[i],levels[i],dt,ATTACK[i],RELEASE[i]);
     }
     if(this.mode!=='demo'&&this.analyser){
+      this.ringSpectrum.update(this.bins,this.ctx.sampleRate,this.analyser.fftSize,this.gain,dt);
       emissionLevels(this.bins,this.ctx.sampleRate,this.analyser.fftSize,this._emissionRaw);
       for(let i=0;i<7;i++)this.emissionBands[i]=followEnvelope(this.emissionBands[i],softLimit(this._emissionRaw[i]*sanitizeGain(this.gain)),dt,.008,.075);
-    }else this.emissionBands.fill(0);
+    }else {this.emissionBands.fill(0);this.ringSpectrum.reset();}
     this.transient=transient;
     const gain=sanitizeGain(this.gain);
     this.bands=this._env.map(v=>softLimit(v*gain));

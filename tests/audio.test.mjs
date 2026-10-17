@@ -94,8 +94,8 @@ test('demoFrame is finite, bounded and beat-aligned', () => {
 test('sanitizeGain and checkAudioFile validate input', () => {
   assert.equal(sanitizeGain(NaN), 1.2); assert.equal(sanitizeGain(-1), 0); assert.equal(sanitizeGain(100), 8);
   assert.throws(() => checkAudioFile(null), AudioError);
-  assert.throws(() => checkAudioFile({ size: 0, type: 'audio/mpeg' }), /tom/);
-  assert.throws(() => checkAudioFile({ size: 5, type: 'image/png', name: 'a.png' }), /ikke en lydfil/);
+  assert.throws(() => checkAudioFile({ size: 0, type: 'audio/mpeg' }), /empty/);
+  assert.throws(() => checkAudioFile({ size: 5, type: 'image/png', name: 'a.png' }), /not an audio file/);
   assert.doesNotThrow(() => checkAudioFile({ size: 5, type: '' }));
   assert.doesNotThrow(() => checkAudioFile({ size: 5, type: 'audio/mpeg' }));
 });
@@ -208,9 +208,9 @@ test('AudioInput microphone denial leaves the previous source untouched and surf
     const a = new AudioInput();
     await a.file(file());
     f.nav.mediaDevices.getUserMedia = async () => { throw Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }); };
-    await assert.rejects(a.microphone(), e => e.code === 'denied' && /mikrofon/.test(e.message));
+    await assert.rejects(a.microphone(), e => e.code === 'denied' && /icrophone/.test(e.message));
     assert.equal(a.mode, 'file'); assert.ok(a.element);
-    assert.match(a.error, /mikrofon/);
+    assert.match(a.error, /icrophone/);
     a.stop(); assert.equal(a.error, null);
   } finally { f.restore(); }
 });
@@ -245,12 +245,12 @@ test('AudioInput file is audible, replaced cleanly, and old URLs/elements are re
   } finally { f.restore(); }
 });
 
-test('AudioInput unsupported or rejected files raise Norwegian errors and keep the old source', async () => {
+test('AudioInput unsupported or rejected files raise English errors and keep the old source', async () => {
   const f = installFakes();
   try {
     const a = new AudioInput();
     await a.file(file('good.mp3'));
-    await assert.rejects(a.file(file('bad.xyz')), e => e.code === 'unsupported-file' && /dekode/.test(e.message));
+    await assert.rejects(a.file(file('bad.xyz')), e => e.code === 'unsupported-file' && /decode/.test(e.message));
     assert.equal(a.mode, 'file'); assert.equal(a.element.src, 'blob:good.mp3');
     assert.ok(f.revoked.includes('blob:bad.xyz'));
     await assert.rejects(a.file({ name: 'x.png', size: 3, type: 'image/png' }), e => e.code === 'bad-file');
@@ -283,8 +283,8 @@ test('AudioInput falls back to demo when the microphone is unplugged', async () 
     a.onchange = (m, r) => events.push([m, r]);
     await a.microphone();
     f.made.streams[0].tracks[0].onended();
-    assert.equal(a.mode, 'demo'); assert.match(a.error, /frakoblet/);
-    assert.deepEqual(events.at(-1), ['demo', 'Mikrofonen ble frakoblet']);
+    assert.equal(a.mode, 'demo'); assert.match(a.error, /disconnected/);
+    assert.deepEqual(events.at(-1), ['demo', 'The microphone disconnected']);
   } finally { f.restore(); }
 });
 test('AudioInput restores a paused file at its playhead without resuming the audio context',async()=>{

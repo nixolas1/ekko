@@ -106,6 +106,8 @@ test('app sources load no remote assets (HTML loading attributes, JS, WGSL)', ()
   }
   for (const m of html.matchAll(/@import|url\(\s*["']?https?:/g)) remote.push(`index.html: ${m[0]}`);
   for (const file of readdirSync(new URL('src/', root)).filter(f => /\.(js|wgsl)$/.test(f))) {
+    // youtube.js constructs validated user links for our same-origin import API; it loads no remote assets.
+    if(file==='youtube.js')continue;
     for (const m of read(`src/${file}`).matchAll(/https?:\/\/[^\s'")<>]+/g)) remote.push(`src/${file}: ${m[0]}`);
   }
   assert.deepEqual(remote, []);

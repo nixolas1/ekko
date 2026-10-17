@@ -9,6 +9,7 @@
 @group(0) @binding(4) var original: texture_2d<f32>;
 @group(0) @binding(5) var linearSampler: sampler;
 @group(0) @binding(6) var result: texture_storage_2d<rgba16float, write>;
+@group(0) @binding(8) var<storage,read_write> detailParticles:array<Particle>;
 @group(0) @binding(7) var scalarResult: texture_storage_2d<r32float, write>;
 
 fn worldSize() -> vec2f { return vec2f(params.clock.z * 2.0, 2.0); }
@@ -25,20 +26,66 @@ fn velAt(q: vec2f) -> vec2f {
 fn rewind(q: vec2f, dt: f32) -> vec2f {
   return q - velAt(q - velAt(q) * dt * .5) * dt;
 }
+fn ringMode() -> bool { return params.simulation.x>6.5; }
+fn ringLevel(i:u32) -> f32 { return params.ringLevels[i/4u][i%4u]; }
+fn ringAttack(i:u32) -> f32 { return params.ringAttacks[i/4u][i%4u]; }
+fn sectorDirection(i:u32) -> vec2f {
+  let angle=2.35619449-f32(i)*TAU/9.0;
+  return vec2f(cos(angle),sin(angle));
+}
+fn ringRadius() -> f32 { return .21*min(params.clock.z,1.0); }
+fn sectorShape(q:vec2f,i:u32) -> f32 {
+  let n=sectorDirection(i);let tangent=vec2f(-n.y,n.x);
+  let delta=q-n*ringRadius();
+  let d=vec2f(dot(delta,n)/.023,dot(delta,tangent)/(.042*min(params.clock.z,1.0)));
+  return exp(-dot(d,d)*.5);
+}
+fn sectorStrength(i:u32) -> f32 {
+  return select(.32,smoothstep(.10,.82,ringLevel(i))*(.3+ringAttack(i)*1.7),params.simulation.y>.5);
+}
+// Response remains an unsaturated physical gain even when the analyser is loud.
+// The two low-frequency jets receive more kick momentum, without lighting silent bands.
+fn sectorLaunch(i:u32)->f32 {
+  let bassWeight=select(1.0,1.85,i<2u);
+  let response=select(1.0,clamp(params.simulation.w,.3,3.0),params.simulation.y>.5);
+  return sectorStrength(i)*(0.55+response*.65)*(1.0+ringAttack(i)*bassWeight*2.2)*bassWeight;
+}
 fn source(q: vec2f) -> vec4f {
-  var s = vec4f(0.0);
-  let width = min(params.clock.z*.7, .95);
-  for (var i=0u; i<7u; i++) {
-    let u = f32(i)/6.0;
-    let centre = vec2f((u-.5)*width*2.0 + .018*sin(params.clock.x*1.3+f32(i)), -.8);
-    let d = (q-centre)/vec2f(.045,.035);
-    let shape = exp(-dot(d,d)*.5);
-    let level = emissionLevel(i,params.emissionLow,params.emissionHigh);
-    let strength = select(.7, smoothstep(.06,.85,level), params.simulation.y>.5);
-    let colour = select(vec3f(.65,.69,.75), lightPalette(params.display.x,u), params.simulation.y>.5);
-    s += vec4f(colour*strength*shape*3.5, strength*shape*5.5);
+  var s=vec4f(0);
+  if(ringMode()){
+    for(var i=0u;i<9u;i++){
+      let sheet=(dot(q,sectorDirection(i))-ringRadius())/.009;
+      let strength=sectorShape(q,i)*sectorStrength(i)*exp(-sheet*sheet*.5);
+      // Full colour spectrum follows frequency. The palette control can still
+      // select a narrower colour field, just as in the original smoke modes.
+      let colour=lightPalette(params.display.x,f32(i)/8.0);
+      s+=vec4f(colour*strength*26.0,strength*5.5)*params.tuning.w;
+    }
+    return s;
+  }
+  let width=min(params.clock.z*.7,.95);
+  for(var i=0u;i<7u;i++){
+    let u=f32(i)/6.0;
+    let centre=vec2f((u-.5)*width*2.0+.018*sin(params.clock.x*1.3+f32(i)),-.8);
+    let d=(q-centre)/vec2f(.045,.035);
+    let shape=exp(-dot(d,d)*.5);
+    let level=emissionLevel(i,params.emissionLow,params.emissionHigh);
+    let strength=select(.7,smoothstep(.06,.85,level),params.simulation.y>.5);
+    let colour=select(vec3f(.65,.69,.75),lightPalette(params.display.x,u),params.simulation.y>.5);
+    s+=vec4f(colour*strength*shape*3.5,strength*shape*5.5)*params.tuning.w;
   }
   return s;
+}
+fn nozzleVelocity(q:vec2f) -> vec2f {
+  var force=vec2f(0);
+  for(var i=0u;i<9u;i++){
+    let n=sectorDirection(i);let tangent=vec2f(-n.y,n.x);
+    // Each finite-width jet sheds counter-rotating vortices at its edges.
+    // Slight directional wobble breaks symmetry without random particle jitter.
+    let wobble=sin(params.clock.x*5.0+f32(i)*2.4)*.28*params.tuning.y;
+    force+=(n+tangent*wobble)*sectorShape(q,i)*sectorLaunch(i)*55.0;
+  }
+  return force;
 }
 
 @compute @workgroup_size(8,8) fn advectVelocity(@builtin(global_invocation_id) id: vec3u) {
@@ -49,9 +96,10 @@ fn source(q: vec2f) -> vec4f {
   var v=vec2f(velAt(rewind(qx,params.clock.y)).x,velAt(rewind(qy,params.clock.y)).y);
   let smoke=textureSampleLevel(field,linearSampler,uvOf(q),0);
   let concentration=dot(smoke.rgb,vec3f(1.0/3.0));
-  v.y += (smoke.a*1.6-concentration*.09)*params.clock.y;
+  v.y += (smoke.a*select(1.6,.13,ringMode())-concentration*.09)*params.clock.y;
   let src=source(q);
-  v += vec2f(.16*sin(params.clock.x*1.9+q.x*19.0),.35)*src.a*params.clock.y;
+  if(ringMode()){v+=nozzleVelocity(q)*params.clock.y;}
+  else {v += vec2f(.16*sin(params.clock.x*1.9+q.x*19.0),.35)*src.a*params.clock.y;}
   for(var j=0u;j<min(u32(params.display.w),32u);j++) {
     let hand=params.forces[j]; let delta=hand.xy-q;
     let radius=max(hand.w,.05); let d=length(delta);
@@ -66,11 +114,11 @@ fn source(q: vec2f) -> vec4f {
     let b=params.bursts[j]; let delta=q-b.xy; let r=length(delta);
     v += (delta+vec2f(-delta.y,delta.x)*.6)/max(r,.02)*exp(-r*r/.18)*b.w*1.8;
   }
-  v *= exp(-params.clock.y*.12);
+  v *= exp(-params.clock.y*select(.12,.85,ringMode()));
   v=clamp(v,vec2f(-3.0),vec2f(3.0));
   // Closed side/bottom walls, open top so the plume can leave the domain.
-  if(id.x==0u || id.x==size.x-1u){v.x=0.0;}
-  if(id.y==0u){v.y=0.0;}
+  if(!ringMode() && (id.x==0u || id.x==size.x-1u)){v.x=0.0;}
+  if(!ringMode() && id.y==0u){v.y=0.0;}
   if(id.y==size.y-1u){v.y=max(v.y,0.0);}
   textureStore(result,c,vec4f(v,0,0));
 }
@@ -88,10 +136,10 @@ fn source(q: vec2f) -> vec4f {
               abs(value(c+vec2i(0,1)).x)-abs(value(c-vec2i(0,1)).x));
   let n=g/max(length(g),.00001);
   let w=value(c).x;
-  var v=textureLoad(velocity,c,0).xy+vec2f(n.y,-n.x)*w*min(h.x,h.y)*4.0*params.clock.y;
+  var v=textureLoad(velocity,c,0).xy+vec2f(n.y,-n.x)*w*min(h.x,h.y)*select(1.8,2.5,ringMode())*params.tuning.y*params.clock.y;
   v=clamp(v,vec2f(-3),vec2f(3));
-  if(id.x==0u || id.x==size.x-1u){v.x=0;}
-  if(id.y==0u){v.y=0;}
+  if(!ringMode() && (id.x==0u || id.x==size.x-1u)){v.x=0;}
+  if(!ringMode() && id.y==0u){v.y=0;}
   textureStore(result,c,vec4f(v,0,0));
 }
 @compute @workgroup_size(8,8) fn divergence(@builtin(global_invocation_id) id: vec3u) {
@@ -107,15 +155,17 @@ fn source(q: vec2f) -> vec4f {
   let neighbours=(value(c-vec2i(1,0)).x+value(c+vec2i(1,0)).x)*a.x
     +(value(c-vec2i(0,1)).x+value(c+vec2i(0,1)).x)*a.y;
   var p=(neighbours-textureLoad(auxiliary,c,0).x)/(2.0*(a.x+a.y));
-  if(id.y==size.y-1u){p=0.0;}
+  if(id.y==size.y-1u || (ringMode() && (id.x==0u || id.x==size.x-1u || id.y==0u))){p=0.0;}
   textureStore(scalarResult,c,vec4f(p,0,0,0));
 }
 @compute @workgroup_size(8,8) fn project(@builtin(global_invocation_id) id: vec3u) {
   let size=textureDimensions(result); if(any(id.xy>=size)){return;}
   let c=vec2i(id.xy); let h=worldSize()/vec2f(size); let p=value(c).x;
   var v=textureLoad(velocity,c,0).xy-vec2f(p-value(c-vec2i(1,0)).x,p-value(c-vec2i(0,1)).x)/h;
-  if(id.x==0u || id.x==size.x-1u){v.x=0.0;}
-  if(id.y==0u){v.y=0.0;}
+  if(!ringMode() && (id.x==0u || id.x==size.x-1u)){v.x=0.0;}
+  if(!ringMode() && id.y==0u){v.y=0.0;}
+  let q=worldAt((vec2f(id.xy)+.5)/vec2f(size));
+  v=mouseVelocity(q,v,params.mouse,params.clock.y);
   textureStore(result,c,vec4f(clamp(v,vec2f(-3),vec2f(3)),0,0));
 }
 fn dye(q: vec2f) -> vec4f {
@@ -145,7 +195,45 @@ fn dye(q: vec2f) -> vec4f {
   smoke+=source(q)*params.clock.y;
   let uv=(vec2f(id.xy)+.5)/vec2f(size);
   smoke*=smoothstep(0.0,.025,uv.x)*smoothstep(0.0,.025,1.0-uv.x)*smoothstep(0.0,.025,1.0-uv.y);
+  if(ringMode()){smoke*=smoothstep(ringRadius()*.62,ringRadius()*.87,length(q))*smoothstep(0.0,.025,uv.y);}
   textureStore(result,c,clamp(smoke,vec4f(0),vec4f(8)));
+}
+// Emissive colour is a separate transported quantity. It stays attached to the
+// moving dye after the note ends; small diffusion spills light into nearby smoke.
+@compute @workgroup_size(8,8) fn advectLight(@builtin(global_invocation_id) id: vec3u) {
+  let size=textureDimensions(result);if(any(id.xy>=size)){return;}
+  let uv=(vec2f(id.xy)+.5)/vec2f(size);let q=worldAt(uv);
+  let back=rewind(q,params.clock.y);let h=worldSize()/vec2f(size)*1.5;
+  let centre=dye(back);
+  let neighbour=(dye(back+vec2f(h.x,0))+dye(back-vec2f(h.x,0))+dye(back+vec2f(0,h.y))+dye(back-vec2f(0,h.y)))*.25;
+  var light=mix(centre,neighbour,min(params.clock.y*5.0,.2))*exp(-params.clock.y*.55);
+  if(params.simulation.y>.5){light+=source(q)*params.clock.y*2.6;}
+  if(ringMode()){light*=smoothstep(ringRadius()*.62,ringRadius()*.87,length(q));}
+  light*=smoothstep(0.0,.025,uv.x)*smoothstep(0.0,.025,1.0-uv.x)*smoothstep(0.0,.025,uv.y)*smoothstep(0.0,.025,1.0-uv.y);
+  textureStore(result,vec2i(id.xy),clamp(light,vec4f(0),vec4f(16)));
+}
+// Native-resolution tracers follow the pressure-projected fluid field. They add
+// fine grain and folded filaments without increasing the pressure grid cost.
+@compute @workgroup_size(256) fn advectDetail(@builtin(global_invocation_id) id:vec3u){
+  if(id.x>=min(u32(params.clock.w),262144u)){return;}
+  var p=detailParticles[id.x];let dt=params.clock.y;let band=id.x%9u;
+  let key=id.x^pcg(u32(params.clock.x*1000.0));
+  let life=2.8+rnd(id.x,81u)*2.2;
+  if(p.state.w<.5 || p.state.z!=7.0){p=Particle(vec4f(0),vec4f(0),vec4f(0,0,7,1),vec4f(f32(band)/8.0,-.001,0,life));}
+  if(p.extra.y<0.0){
+    let strength=sectorStrength(band);
+    if(rnd(key,82u)>1.0-exp(-strength*params.tuning.w*dt*4.0)){detailParticles[id.x]=p;return;}
+    let n=sectorDirection(band);let tangent=vec2f(-n.y,n.x);
+    let across=(rnd(key,83u)+rnd(key,84u)-1.0)*.052;
+    let q=n*(ringRadius()+(rnd(key,85u)-.5)*.009)+tangent*across;
+    p.position=vec4f(q,(rnd(key,86u)-.5)*.035,select(0.0,clamp(ringLevel(band)*.8+ringAttack(band)*.7,0.0,1.5),params.simulation.y>.5));
+    p.extra.y=0.0;
+  }
+  let q=p.position.xy;let v=mouseVelocity(q,velAt(q+velAt(q)*dt*.5),params.mouse,dt);
+  p.position=vec4f(q+v*dt,p.position.z,p.position.w);
+  p.velocity=vec4f(v,0,0);p.extra.y+=dt;
+  if(p.extra.y>life || any(abs(p.position.xy)>worldSize()*.51) || length(p.position.xy)<ringRadius()*.65){p.extra.y=-.001;}
+  detailParticles[id.x]=p;
 }
 struct FluidVertex { @builtin(position) position: vec4f, @location(0) uv: vec2f }
 @vertex fn fluidVertex(@builtin(vertex_index) id: u32) -> FluidVertex {
@@ -160,7 +248,13 @@ struct FluidVertex { @builtin(position) position: vec4f, @location(0) uv: vec2f 
   let edge=clamp((concentration-max(near.r,max(near.g,near.b)))*.8,-.25,.45);
   let alpha=(1.0-exp(-concentration*2.4))*smoothstep(.012,.09,concentration);
   let hue=s.rgb/max(concentration,.0001);
-  let musicLight=select(0.0,1.0,params.simulation.y>.5);
-  let lighting=.6+edge+musicLight*(params.sound.x*.65+params.simulation.z*.4);
-  return vec4f(hue*alpha*lighting,1);
+  let emission=textureSampleLevel(auxiliary,linearSampler,input.uv,0).rgb;
+  let peak=max(emission.r,max(emission.g,emission.b));
+  // Keep the fine MacCormack density edges in the light: the transported lamp
+  // field controls energy, while the sharper dye supplies the visible structure.
+  let glow=s.rgb*min(peak/max(concentration,.001),4.0)*smoothstep(.018,.16,peak);
+  let core=pow(clamp(peak*.45,0.0,1.0),2.0);
+  let base=hue*alpha*(.38+edge);
+  let colour=base+glow*(.8+alpha*.7)+vec3f(1.0,.96,.9)*core*.25;
+  return vec4f(colour*select(1.0,.22,ringMode()),1);
 }

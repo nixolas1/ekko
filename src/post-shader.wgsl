@@ -17,7 +17,7 @@ fn luminance(c: vec3f) -> f32 { return dot(c, vec3f(0.2126, 0.7152, 0.0722)); }
 // Apply the toe to accumulated smoke, not each particle: dense fine filaments survive
 // automatic particle-count changes. Max RGB preserves saturated blue and red edges.
 fn smokeContrast(c: vec3f) -> vec3f {
-  if (params.simulation.x < 3.5 || params.simulation.x > 5.5) { return c; }
+  if (params.simulation.x < 3.5 || (params.simulation.x > 5.5 && params.simulation.x < 7.5)) { return c; }
   let peak = max(c.r, max(c.g, c.b));
   return c * smoothstep(0.012, 0.085, peak) * 1.18;
 }
@@ -58,7 +58,7 @@ fn bright(c: vec3f) -> vec3f { let clean = smokeContrast(c); return clean * smoo
 
 @fragment fn compositeFragment(input: FullscreenOutput) -> @location(0) vec4f {
   let scene = smokeContrast(textureSampleLevel(tex0, samp, input.uv, 0.0).rgb);
-  let glow = textureSampleLevel(tex1, samp, input.uv, 0.0).rgb;
+  let glow = textureSampleLevel(tex1, samp, input.uv, 0.0).rgb * params.tuning.z;
   let energy = clamp(params.sound.w, 0.0, 1.0);
   let high = clamp(params.sound.z, 0.0, 1.0);
   // Sparse anamorphic glare from the quarter-resolution bright-pass texture.
@@ -67,6 +67,7 @@ fn bright(c: vec3f) -> vec3f { let clean = smokeContrast(c); return clean * smoo
   var glare = textureSampleLevel(tex1, samp, input.uv + vec2f(spread, 0.0), 0.0).rgb;
   glare += textureSampleLevel(tex1, samp, input.uv - vec2f(spread, 0.0), 0.0).rgb;
   glare += (textureSampleLevel(tex1, samp, input.uv + vec2f(spread * 2.7, 0.0), 0.0).rgb + textureSampleLevel(tex1, samp, input.uv - vec2f(spread * 2.7, 0.0), 0.0).rgb) * 0.35;
+  glare *= params.tuning.z;
   // Additive particle overlap already raises HDR luminance. Bloom grows locally with that
   // density, rather than putting a uniform haze over sparse, individual particles.
   let overlap = smoothstep(0.16, 1.2, luminance(scene));
@@ -82,7 +83,7 @@ fn bright(c: vec3f) -> vec3f { let clean = smokeContrast(c); return clean * smoo
   let centered = input.uv - vec2f(0.5);
   let vignette = 1.0 - dot(centered, centered) * 0.7;
   let dither = (fract(52.9829189 * fract(dot(input.position.xy, vec2f(0.06711056, 0.00583715)))) - 0.5) / 255.0;
-  let smokeMode = params.simulation.x > 3.5 && params.simulation.x < 5.5;
+  let smokeMode = (params.simulation.x > 3.5 && params.simulation.x < 5.5) || params.simulation.x > 6.5;
   let background = select(vec3f(0.004, 0.006, 0.016), vec3f(0.0), smokeMode);
   return vec4f(max(color * vignette + background * vignette + dither, vec3f(0.0)), 1.0);
 }

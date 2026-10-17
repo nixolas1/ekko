@@ -255,6 +255,7 @@ fn simulateSmoke(id: u32, old: Particle) -> Particle {
   // Weak density pressure preserves wisps while keeping coincident particles apart.
   v += vec3f(separation(q.xy, id) * dt * 0.035, 0.0);
   v *= min(1.0, 3.5 / max(length(v), 0.001));
+  v=vec3f(mouseVelocity(q.xy,v.xy,params.mouse,dt),v.z);
   q += v * dt * (0.8 + energy * 0.65);
   if (p.extra.y > p.extra.w || abs(q.x) > params.clock.z * 1.2 || abs(q.y) > 1.3 || abs(q.z) > 1.4) { return newSmoke(id, mode, false); }
   return Particle(vec4f(q, 0.0), vec4f(v, p.velocity.w), vec4f(p.state.x, heat, mode, 1.0), p.extra);
@@ -408,6 +409,7 @@ fn simulate(@builtin(global_invocation_id) gid: vec3u) {
 
   v += vec3f(separation(q.xy, id) * dt, 0.0);
   v *= min(1.0, 5.0 / max(length(v), 0.0001));
+  v=vec3f(mouseVelocity(q.xy,v.xy,params.mouse,dt),v.z);
   q += v * dt * musicSpeed;
   if (persistent) {
     let bounds = vec3f(max(aspect * 0.98, 0.2), 0.98, 0.9);

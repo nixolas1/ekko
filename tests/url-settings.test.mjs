@@ -1,0 +1,35 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {settingsFromURL,settingsURL,syncSettingsURL} from '../src/url-settings.js';
+import {normalizeSettings} from '../src/preferences.js';
+test('full share link restores all controls and song without autoplay',()=>{
+ const s=normalizeSettings({physicsMode:'duet',count:3145728,autoCount:false,resolution:'4k',pullPower:.025,pushPower:2.7,maxHands:8,palette:3,effect:2,persistent:false,gain:2.3,paused:true,immersive:true,audio:{kind:'reference',track:'aqua-doctor-jones',position:52.4,playing:true}});
+ assert.deepEqual(settingsFromURL(settingsURL('https://ekko-three.vercel.app/?utm_source=friend#view',s)),s);
+ assert.match(settingsURL('https://ekko-three.vercel.app/?utm_source=friend#view',s),/utm_source=friend/);
+});
+test('partial links win over storage; malformed values leave saved preferences intact',()=>{
+ const saved=normalizeSettings({palette:2,pullPower:.05,physicsMode:'duet',gain:2,audio:{kind:'file',position:44}});
+ const actual=settingsFromURL('https://ekko-three.vercel.app/?mode=ring&song=mitis-shattered&pull=NaN&palette=90&gain=&auto=maybe&t=-1',saved);
+ assert.equal(actual.physicsMode,'ring');assert.equal(actual.palette,2);assert.equal(actual.pullPower,.05);assert.equal(actual.gain,2);
+ assert.equal(actual.audio.track,'mitis-shattered');assert.equal(actual.audio.kind,'reference');assert.equal(actual.audio.position,0);assert.equal(actual.audio.playing,false);
+ assert.deepEqual(settingsFromURL('https://ekko-three.vercel.app/?mode=nope&song=unknown',saved),saved);
+});
+test('live updates replace history only when changed, preserving the existing history state',()=>{
+ const location={href:'https://ekko-three.vercel.app/'},calls=[],history={state:{a:1},replaceState(state,title,url){calls.push({state,title,url});location.href=url;}};
+ const s=normalizeSettings();syncSettingsURL(s,location,history);syncSettingsURL(s,location,history);
+ assert.equal(calls.length,1);assert.deepEqual(calls[0].state,{a:1});
+ syncSettingsURL({...s,pullPower:.007,pushPower:.007},location,history);assert.equal(calls.length,2);assert.match(location.href,/force=0.007/);
+});
+
+test('old force links migrate to one force; pause URLs cannot freeze a fresh session',()=>{
+ const s=settingsFromURL('https://ekko-three.vercel.app/?push=0.025&paused=1&playing=1');assert.equal(s.pullPower,.025);assert.equal(s.pushPower,.025);assert.equal(s.paused,null);assert.equal(s.audio.playing,false);
+ const link=settingsURL('https://ekko-three.vercel.app/?pull=1&push=2&paused=1&playing=1',s);assert.match(link,/force=0.025/);assert.doesNotMatch(link,/pull=|push=|paused=|playing=/);
+});
+
+test('per-mode tuning survives links without changing other modes',()=>{
+ const saved=normalizeSettings({modeSettings:{smoke:{speed:.5}}});
+ const parsed=settingsFromURL('https://example.test/?mode=fluid-ring&speed=1.8&glow=2&turbulence=.3&emission=1.5',saved);
+ assert.deepEqual(parsed.modeSettings['fluid-ring'],{speed:1.8,glow:2,turbulence:.3,emission:1.5});
+ assert.equal(parsed.modeSettings.smoke.speed,.5);
+ const again=settingsFromURL(settingsURL('https://example.test/',parsed),saved);
+ assert.deepEqual(again.modeSettings['fluid-ring'],parsed.modeSettings['fluid-ring']);
+});

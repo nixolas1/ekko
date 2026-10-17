@@ -17,3 +17,6 @@ references/*
 .vercel/
 .vercel
 .env*
+
+__pycache__/
+*.pyc

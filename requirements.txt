@@ -1,0 +1,2 @@
+# api/youtube.py: yt-dlp needs a JS runtime for YouTube's player challenges; the deno extra ships one as a wheel.
+yt-dlp[default,deno]==2026.8.19

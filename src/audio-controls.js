@@ -79,6 +79,29 @@ export function emissionLevels(bins,sampleRate,fftSize=ANALYSER.fftSize,out=new 
   return out;
 }
 
+// Nine non-overlapping sectors, bass at 10:30 and increasing clockwise.
+// Boundaries fit the analyser's bins even at 96 kHz; no duplicated sub-bass bins.
+export const RING_BANDS_HZ=[[30,120],[120,250],[250,500],[500,1000],[1000,2000],[2000,3500],[3500,6000],[6000,10000],[10000,20000]];
+export function ringLevels(bins,sampleRate,fftSize=ANALYSER.fftSize,out=new Float32Array(9)){
+  for(let i=0;i<9;i++){
+    const [lo,hi]=bandRange(...RING_BANDS_HZ[i],sampleRate,fftSize,bins.length);
+    const level=gate(bandLevel(bins,lo,hi));out[i]=level>0?clamp01(level+i*.012):0;
+  }
+  return out;
+}
+export class RingSpectrum {
+  constructor(){this.levels=new Float32Array(9);this.attacks=new Float32Array(9);this.previous=new Float32Array(9);this.raw=new Float32Array(9);}
+  reset(){this.levels.fill(0);this.attacks.fill(0);this.previous.fill(0);}
+  update(bins,sampleRate,fftSize,gain,dt){
+    ringLevels(bins,sampleRate,fftSize,this.raw);
+    for(let i=0;i<9;i++){
+      const target=softLimit(this.raw[i]*sanitizeGain(gain));
+      this.attacks[i]=Math.max(this.attacks[i]*Math.exp(-dt/.18),clamp01((this.raw[i]-this.previous[i]-.018)*5*Math.sqrt(sanitizeGain(gain))));
+      this.previous[i]=this.raw[i];this.levels[i]=followEnvelope(this.levels[i],target,dt,.008,.085);
+    }
+  }
+}
+
 // Spectral-flux onset detector. Feed it un-smoothed band levels each frame; it returns a 0..1
 // envelope that jumps on onsets (kick, snare, clap) and decays in ~140 ms.
 export class TransientDetector {
@@ -109,7 +132,7 @@ export function demoFrame(time, bins) {
   return { levels: [beat * 0.65, 0.18 + Math.sin(t * 2.1) * 0.1, 0.12 + beat * 0.23, 0.15 + beat * 0.4], transient: Math.exp(-phase * 6) };
 }
 
-// Errors carry a stable `code` for callers and a Norwegian message because main.js prints error.message verbatim.
+// Errors carry a stable `code` for callers and an English message because main.js prints error.message verbatim.
 export class AudioError extends Error {
   constructor(code, message, cause) { super(message); this.name = 'AudioError'; this.code = code; if (cause) this.cause = cause; }
 }
@@ -117,14 +140,14 @@ export class AudioError extends Error {
 export function microphoneError(error) {
   if (error instanceof AudioError) return error;
   const name = error?.name;
-  if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError') return new AudioError('denied', 'tilgang til mikrofonen ble avvist. Tillat mikrofon for dette nettstedet i nettleseren og prøv igjen', error);
-  if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') return new AudioError('no-device', 'fant ingen mikrofon', error);
-  if (name === 'NotReadableError' || name === 'AbortError' || name === 'TrackStartError') return new AudioError('busy', 'mikrofonen er i bruk av et annet program eller kunne ikke åpnes', error);
-  return new AudioError('failed', error?.message || 'ukjent feil', error);
+  if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError') return new AudioError('denied', 'Microphone access was denied. Allow microphone access for this site and try again.', error);
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError') return new AudioError('no-device', 'No microphone found.', error);
+  if (name === 'NotReadableError' || name === 'AbortError' || name === 'TrackStartError') return new AudioError('busy', 'The microphone is busy or could not be opened.', error);
+  return new AudioError('failed', error?.message || 'unknown error', error);
 }
 
 export async function requestMicrophone(mediaDevices) {
-  if (!mediaDevices?.getUserMedia) throw new AudioError('unsupported', 'nettleseren gir ikke tilgang til mikrofon her (krever https eller localhost)');
+  if (!mediaDevices?.getUserMedia) throw new AudioError('unsupported', 'Microphone access requires HTTPS or localhost.');
   // Raw, unprocessed input: AGC/noise suppression would flatten the dynamics the visuals read.
   const raw = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
   try {
@@ -144,29 +167,29 @@ export async function resumeContext(ctx, timeoutMs = 2000) {
     try {
       await Promise.race([ctx.resume(), new Promise(resolve => { timer = setTimeout(resolve, timeoutMs); })]);
     } catch (error) {
-      throw new AudioError('blocked', `nettleseren startet ikke lydmotoren (${error?.message || error?.name || 'ukjent feil'})`, error);
+      throw new AudioError('blocked', `The browser could not start the audio engine (${error?.message || error?.name || 'unknown error'})`, error);
     } finally { clearTimeout(timer); }
   }
-  if (ctx.state !== 'running') throw new AudioError('blocked', 'nettleseren blokkerer lyd til du har klikket på siden. Trykk på knappen igjen');
+  if (ctx.state !== 'running') throw new AudioError('blocked', 'Click Play to enable audio in this browser.');
   return ctx;
 }
 
 export function checkAudioFile(file) {
-  if (!file || typeof file !== 'object' || typeof file.size !== 'number') throw new AudioError('bad-file', 'ingen fil valgt');
-  if (file.size === 0) throw new AudioError('bad-file', 'filen er tom');
+  if (!file || typeof file !== 'object' || typeof file.size !== 'number') throw new AudioError('bad-file', 'No file selected.');
+  if (file.size === 0) throw new AudioError('bad-file', 'The file is empty.');
   const type = file.type || '';
-  if (type && !/^(audio|video)\//.test(type) && type !== 'application/ogg' && type !== 'application/octet-stream') throw new AudioError('bad-file', `«${file.name || 'filen'}» er ikke en lydfil (${type})`);
+  if (type && !/^(audio|video)\//.test(type) && type !== 'application/ogg' && type !== 'application/octet-stream') throw new AudioError('bad-file', `«${file.name || 'the file'}» is not an audio file (${type})`);
   return file;
 }
 
 export function playbackError(error, file) {
   if (error instanceof AudioError) return error;
-  const label = file?.name ? `«${file.name}»` : 'filen';
+  const label = file?.name ? `«${file.name}»` : 'the file';
   switch (error?.name) {
-    case 'NotSupportedError': return new AudioError('unsupported-file', `nettleseren kan ikke dekode ${label}. Prøv MP3, WAV, OGG eller M4A`, error);
-    case 'NotAllowedError': return new AudioError('blocked', 'nettleseren blokkerte avspilling. Trykk på knappen igjen', error);
-    case 'AbortError': return new AudioError('aborted', 'avspillingen ble avbrutt', error);
-    default: return new AudioError('failed', error?.message || 'ukjent feil', error);
+    case 'NotSupportedError': return new AudioError('unsupported-file', `The browser cannot decode ${label}. Try MP3, WAV, OGG or M4A.`, error);
+    case 'NotAllowedError': return new AudioError('blocked', 'Playback was blocked. Press Play again.', error);
+    case 'AbortError': return new AudioError('aborted', 'Playback was interrupted.', error);
+    default: return new AudioError('failed', error?.message || 'unknown error', error);
   }
 }
 
@@ -178,7 +201,7 @@ export function whenLoaded(element, timeoutMs = 10000) {
     const done = fn => value => { clearTimeout(timer); element.removeEventListener('loadedmetadata', onLoad); element.removeEventListener('error', onError); fn(value); };
     const onLoad = done(resolve);
     const onError = done(() => reject(Object.assign(new Error('media error'), { name: 'NotSupportedError' })));
-    timer = setTimeout(done(() => reject(new AudioError('timeout', 'lydfilen brukte for lang tid på å lastes'))), timeoutMs);
+    timer = setTimeout(done(() => reject(new AudioError('timeout', 'Audio loading timed out.'))), timeoutMs);
     element.addEventListener('loadedmetadata', onLoad);
     element.addEventListener('error', onError);
   });
@@ -190,7 +213,7 @@ export async function toggleFullscreen(root = globalThis.document?.documentEleme
   const current = doc.fullscreenElement || doc.webkitFullscreenElement;
   if (current) { await (doc.exitFullscreen || doc.webkitExitFullscreen)?.call(doc); return false; }
   const request = root.requestFullscreen || root.webkitRequestFullscreen;
-  if (!request) throw new AudioError('unsupported', 'nettleseren støtter ikke fullskjerm her');
+  if (!request) throw new AudioError('unsupported', 'Fullscreen is unavailable in this browser.');
   await request.call(root, { navigationUI: 'hide' });
   return true;
 }

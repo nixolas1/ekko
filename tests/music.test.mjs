@@ -34,18 +34,18 @@ test('loadTrackFile fetches the local path and reports a missing file in Norwegi
  const t=trackById('mitis-shattered'),calls=[];
  const file=await loadTrackFile(t,async url=>{calls.push(url);return {ok:true,blob:async()=>new Blob([new Uint8Array(8)],{type:'audio/webm'})};});
  assert.deepEqual(calls,['/audio/mitis-shattered.webm']);assert.equal(file.type,'audio/webm');assert.equal(file.size,8);
- await assert.rejects(loadTrackFile(t,async()=>({ok:false})),/finnes ikke lokalt/);
+ await assert.rejects(loadTrackFile(t,async()=>({ok:false})),/is unavailable/);
 });
 
 test('main.js: selection loads paused, only the explicit Play click autoplays, stop still cancels loads',()=>{
  const main=read('src/main.js'),html=read('index.html');
- assert.match(main,/\$\('track-select'\)\.onchange=[\s\S]*?loadLibraryTrack\(e\.target\.value\)/);
+ assert.match(main,/\$\('track-select'\)\.onchange=[\s\S]*?loadLibraryTrack\(selection\)/);
  assert.doesNotMatch(main,/loadLibraryTrack\(e\.target\.value,\s*\{[^}]*autoplay:\s*true/);
  assert.equal([...main.matchAll(/autoplay:true/g)].length,1,'exactly one autoplay site (the Play button)');
- assert.match(main,/\$\('track-play'\)\.onclick=[\s\S]*?loadLibraryTrack\(id,\{autoplay:true\}\)/);
+ assert.match(main,/async function toggleAudio[\s\S]*?loadLibraryTrack\(id,\{autoplay:true\}\)/);
  assert.match(main,/sound\.file\(file,\{autoplay:false,position:previous\.position\}\)/,'reload restores paused at the saved playhead');
  assert.match(main,/async function loadLibraryTrack[\s\S]*?const revision=\+\+audioRevision[\s\S]*?if\(revision!==audioRevision\)return false/);
- assert.match(main,/\$\('stop-audio'\)\.onclick=\(\)=>\{audioRevision\+\+/);
+ assert.match(main,/audioRevision\+\+;sound\.silence\(\)/);
  for(const t of LOCAL_TRACKS)assert.match(html,new RegExp(`data-track-credit="${t.id}"`),`credit link for ${t.id}`);
  assert.match(html,/id="audio-file"/);assert.match(html,/id="microphone"/);
 });

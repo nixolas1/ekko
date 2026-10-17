@@ -303,7 +303,7 @@ test('Tracking: start loads the worker, keeps camera aspect, and posts a transfe
   try {
     await r.tracking.start();
     assert.equal(r.tracking.active, true);
-    assert.ok(r.statuses.includes('Kamera aktivt'));
+    assert.ok(r.statuses.includes('Camera active'));
     const worker = r.workers[0];
     assert.deepEqual(worker.posted[0].message, { type: 'init', maxHands: 2 });
     await r.tracking.capture();
@@ -431,7 +431,7 @@ test('Tracking: model/worker init failure rejects start and cleans up', async ()
   } finally { r.restore(); }
 });
 
-test('Tracking: fatal worker error stops tracking with a "Sporing stoppet" status', async () => {
+test('Tracking: fatal worker error stops tracking with a "Tracking stopped" status', async () => {
   const r = rig();
   try {
     await r.tracking.start();
@@ -439,7 +439,7 @@ test('Tracking: fatal worker error stops tracking with a "Sporing stoppet" statu
     assert.equal(r.tracking.active, false);
     assert.equal(r.workers[0].terminated, true);
     assert.equal(r.track.stopped, true);
-    assert.match(r.statuses.at(-1), /^Sporing stoppet: wasm abort/);
+    assert.match(r.statuses.at(-1), /^Tracking stopped: wasm abort/);
   } finally { r.restore(); }
 });
 
@@ -455,7 +455,7 @@ test('Tracking: sporadic frame errors are tolerated, a run of them is not', asyn
     assert.equal(r.tracking.active, true);
     worker.emit({ type: 'error', message: 'glitch', fatal: false });
     assert.equal(r.tracking.active, false);
-    assert.match(r.statuses.at(-1), /^Sporing stoppet/);
+    assert.match(r.statuses.at(-1), /^Tracking stopped/);
   } finally { r.restore(); }
 });
 
@@ -465,7 +465,7 @@ test('Tracking: unplugging the camera stops tracking with a status', async () =>
     await r.tracking.start();
     r.track.onended();
     assert.equal(r.tracking.active, false);
-    assert.match(r.statuses.at(-1), /^Sporing stoppet: kameraet/);
+    assert.match(r.statuses.at(-1), /^Tracking stopped: camera/);
   } finally { r.restore(); }
 });
 

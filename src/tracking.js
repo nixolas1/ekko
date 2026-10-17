@@ -15,9 +15,9 @@ export function captureSize(width, height, longSide = CAPTURE_LONG_SIDE) {
   const scale = Math.min(1, longSide / Math.max(width, height));
   return { width: even(width * scale), height: even(height * scale) };
 }
-const abortError = () => Object.assign(new Error('Kamerastart avbrutt.'), { name: 'AbortError' });
+const abortError = () => Object.assign(new Error('Camera startup cancelled.'), { name: 'AbortError' });
 
-// onStatus messages starting with "Sporing stoppet" are fatal: tracking has already been
+// onStatus messages starting with "Tracking stopped" are fatal: tracking has already been
 // stopped (active === false) when they are delivered.
 export class Tracking {
   constructor(video, onResult, onStatus, options = {}) {
@@ -46,7 +46,7 @@ export class Tracking {
     this.cameraFps = stream.getVideoTracks()[0]?.getSettings?.().frameRate;
     try {
       stream.getVideoTracks().forEach(track => track.onended = () => {
-        if (this.stream === stream) this.#fail('Sporing stoppet: kameraet ble frakoblet.');
+        if (this.stream === stream) this.#fail('Tracking stopped: camera disconnected.');
       });
       this.video.muted = true; this.video.playsInline = true; this.video.srcObject = stream;
       await this.video.play();
@@ -55,8 +55,8 @@ export class Tracking {
       const worker = this.worker = this.#createWorker();
       await this.#initWorker(worker);
       if (cancelled()) throw abortError();
-      worker.onerror = e => this.#fail(`Sporing stoppet: ${e.message || 'sporingsworkeren feilet'}`, worker);
-      worker.onmessageerror = () => this.#fail('Sporing stoppet: ugyldig melding fra sporingsworkeren.', worker);
+      worker.onerror = e => this.#fail(`Tracking stopped: ${e.message || 'tracking worker failed'}`, worker);
+      worker.onmessageerror = () => this.#fail('Tracking stopped: invalid tracking worker message.', worker);
       worker.onmessage = ({ data }) => this.#message(worker, data);
       this.failures = 0; this.busy = false; this.lastVideo = -1; this.seenTime = -1; this.stalled = false;
       this.frameAt = performance.now();
@@ -73,7 +73,7 @@ export class Tracking {
         };
         this.videoCallback = this.video.requestVideoFrameCallback(onFrame);
       }
-      this.onStatus('Kamera aktivt');
+      this.onStatus('Camera active');
       this.timer = setInterval(() => this.#tick(), POLL_MS);
     } catch (error) {
       // A cancelled start was already torn down by stop(); a newer start may own the video now.
@@ -87,10 +87,10 @@ export class Tracking {
   }
   #initWorker(worker) {
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => settle(reject, new Error('Sporingsmodellene brukte for lang tid. Prøv kameraet på nytt.')), INIT_TIMEOUT);
+      const timeout = setTimeout(() => settle(reject, new Error('Tracking model loading timed out. Try the camera again.')), INIT_TIMEOUT);
       const settle = (done, value) => { clearTimeout(timeout); this.rejectInit = null; done(value); };
       this.rejectInit = error => settle(reject, error);
-      worker.onerror = e => settle(reject, new Error(e.message || 'Sporingsworker kunne ikke starte.'));
+      worker.onerror = e => settle(reject, new Error(e.message || 'Could not start the tracking worker.'));
       worker.onmessage = ({ data }) => {
         if (data.type === 'ready') { this.backend=data.backend; settle(resolve); }
         else if (data.type === 'error') settle(reject, new Error(data.message));
@@ -102,7 +102,7 @@ export class Tracking {
     if (worker !== this.worker || !this.active) return;
     if (data.type === 'error') {
       this.busy = false;
-      if (data.fatal || ++this.failures >= MAX_FRAME_ERRORS) this.#fail(`Sporing stoppet: ${data.message}`, worker);
+      if (data.fatal || ++this.failures >= MAX_FRAME_ERRORS) this.#fail(`Tracking stopped: ${data.message}`, worker);
       return;
     }
     if (data.type !== 'result') return;
@@ -126,12 +126,12 @@ export class Tracking {
   #tick() {
     if (!this.active) return;
     const now = performance.now(), video = this.video;
-    if (this.busy && now - this.busySince > RESPONSE_TIMEOUT) { this.#fail('Sporing stoppet: sporingsworkeren svarer ikke.'); return; }
+    if (this.busy && now - this.busySince > RESPONSE_TIMEOUT) { this.#fail('Tracking stopped: tracking worker is not responding.'); return; }
     if (globalThis.document?.hidden) { this.frameAt = now; return; } // no capture for a hidden tab
     if (video.currentTime !== this.seenTime) {
       this.seenTime = video.currentTime; this.frameAt = now;
-      if (this.stalled) { this.stalled = false; this.onStatus('Kamera aktivt'); }
-    } else if (!this.stalled && now - this.frameAt > STALL_MS) { this.stalled = true; this.onStatus('Kamerabildet står stille …'); }
+      if (this.stalled) { this.stalled = false; this.onStatus('Camera active'); }
+    } else if (!this.stalled && now - this.frameAt > STALL_MS) { this.stalled = true; this.onStatus('Camera frame stalled…'); }
     this.capture();
   }
   async #bitmap(size) {
@@ -159,7 +159,7 @@ export class Tracking {
     } catch (error) {
       if (worker !== this.worker) return;
       this.busy = false;
-      if (++this.failures >= MAX_FRAME_ERRORS) this.#fail(`Sporing stoppet: ${error.message}`, worker);
+      if (++this.failures >= MAX_FRAME_ERRORS) this.#fail(`Tracking stopped: ${error.message}`, worker);
     }
   }
   stop() {

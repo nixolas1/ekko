@@ -3,39 +3,45 @@ import { ParticleEngine } from './gpu';
 import { AudioInput } from './audio';
 import { Tracking } from './tracking';
 import { HandForces } from './interactions';
-import {forceFromSlider,sliderFromForce,clampForce} from './force-controls';
-import { FlightGame } from './flight';
+import {forceFromSlider,sliderFromForce} from './force-controls';
 import { AdaptiveQuality } from './performance';
 import { loadSettings, saveSettings, cacheMusicFile, loadMusicFile } from './preferences';
+import {shortcutAction} from './shortcuts';
+import {settingsFromURL,createURLWriter} from './url-settings';
+import {parseYouTubeVideoId,importYouTubeAudio} from './youtube';
 import { LOCAL_TRACKS, loadTrackFile, resolveTrackId, trackById, trackLabel } from './music';
-const $=id=>document.getElementById(id), settings=loadSettings();
+const $=id=>document.getElementById(id), settings=settingsFromURL(location.href,loadSettings());
+const writeURL=createURLWriter();
 const engine=new ParticleEngine($('scene')), sound=new AudioInput(), handForces=new HandForces();
 Object.assign(engine,{count:settings.count,palette:settings.palette,effect:settings.effect,persistent:settings.persistent,resolution:settings.resolution});
 sound.gain=settings.gain;
 let physicsMode=settings.physicsMode;
-const flight=new FlightGame($('flight-scene'));
-let paused=settings.paused??matchMedia('(prefers-reduced-motion: reduce)').matches;
-let pullPower=settings.pullPower,pushPower=settings.pushPower;
+const modeSettings=settings.modeSettings;
+// Playback and scene pause are session-only; links never restore a frozen scene.
+let paused=matchMedia('(prefers-reduced-motion: reduce)').matches;
+let pullPower=settings.pullPower,pushPower=settings.pullPower;
 const adaptiveQuality=new AdaptiveQuality();let autoCount=settings.autoCount;
 let ready=false,trackingData=null,trackingTime=0,cameraStarting=false,noticeTimer;
-let audioSelection={...settings.audio,playing:false},restoring=true,shuttingDown=false,audioRevision=0;
+let audioSelection={...settings.audio,playing:false},restoring=true,shuttingDown=false,audioRevision=0,pendingTrack=null,transportBusy=false,transportToken=0;
 function notice(message){$('notice').textContent=message;$('notice').hidden=false;clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>$('notice').hidden=true,9000);}
-function gpuError(message){ready=false;$('gpu-error').hidden=false;$('gpu-error-message').textContent=message;$('gpu-status').textContent='WebGPU utilgjengelig';}
+function gpuError(message){ready=false;$('gpu-error').hidden=false;$('gpu-error-message').textContent=message;$('gpu-status').textContent='WebGPU unavailable';}
 engine.onError=gpuError;
 function persist(){
   if(restoring||shuttingDown)return;
   if(sound.mode==='file'&&sound.element)audioSelection={...audioSelection,position:sound.element.currentTime,playing:!sound.element.paused};
-  saveSettings({resolution:engine.resolution,pullPower,pushPower,count:autoCount?settings.count:engine.count,autoCount,maxHands:tracker.options.maxHands,palette:engine.palette,effect:engine.effect,persistent:engine.persistent,physicsMode,gain:sound.gain,paused,immersive:document.body.classList.contains('immersive'),audio:{...audioSelection,track:audioSelection.kind==='reference'?audioSelection.track:$('track-select').value||audioSelection.track}});
+  const current={resolution:engine.resolution,pullPower,pushPower,count:autoCount?settings.count:engine.count,autoCount,maxHands:tracker.options.maxHands,palette:engine.palette,effect:engine.effect,persistent:engine.persistent,physicsMode,modeSettings,gain:sound.gain,paused,immersive:document.body.classList.contains('immersive'),audio:{...audioSelection,track:audioSelection.kind==='reference'?audioSelection.track:$('track-select').value||audioSelection.track}};
+  if(pendingTrack)current.audio={...current.audio,kind:'reference',track:pendingTrack,position:0};
+  saveSettings(current);writeURL(current);
 }
 const handMarkers=Array.from({length:8},()=>{const node=document.createElement('div');node.className='hand-marker';node.hidden=true;node.innerHTML='<span></span>';$('hand-indicators').append(node);return node;});
-const bars=Array.from({length:36},()=>{const bar=document.createElement('i');$('spectrum').append(bar);return bar;});
+const bars=Array.from({length:4},()=>{const bar=document.createElement('i');$('spectrum').append(bar);return bar;});
 function mapPoint(p){const aspect=innerWidth/innerHeight,cameraAspect=($('camera').videoWidth||640)/($('camera').videoHeight||480);return [(1-2*p.x)*Math.min(aspect,cameraAspect),(1-2*p.y)*Math.min(1,aspect/cameraAspect)];}
 const tracker=new Tracking($('camera'),data=>{
   trackingData=data;trackingTime=performance.now();handForces.update(data,trackingTime,mapPoint);
-  $('camera-count').textContent=`${data.hands.length} hender`;
+  $('camera-count').textContent=`${data.hands.length} hands`;
   for(const point of data.bursts){const [x,y]=mapPoint(point);engine.explode(x,y);}
   drawSkeleton(data);
-},status=>{ $('tracking-status').textContent=status;if(status.startsWith('Sporing stoppet')){resetCamera();notice(status);} },{maxHands:settings.maxHands});
+},status=>{ $('tracking-status').textContent=status;if(status.startsWith('Tracking stopped')){resetCamera();notice(status);} },{maxHands:settings.maxHands});
 function drawSkeleton(data){
   const canvas=$('skeleton'),video=$('camera');canvas.width=canvas.clientWidth*2;canvas.height=canvas.clientHeight*2;
   const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -46,37 +52,39 @@ function drawSkeleton(data){
   ctx.strokeStyle='#87f1e6';ctx.lineWidth=2;
   for(const hand of data.hands){ctx.beginPath();for(const [a,b] of edges){ctx.moveTo(...xy(hand[a]));ctx.lineTo(...xy(hand[b]));}ctx.stroke();}
 }
-function resetCamera(){trackingData=null;handForces.clear();$('camera-button').innerHTML='Aktiver kamera <span>↗</span>';$('camera-placeholder').hidden=false;$('camera-count').textContent=`Opptil ${tracker.options.maxHands} hender`;$('tracking-hz').textContent='—';$('skeleton').getContext('2d').clearRect(0,0,$('skeleton').width,$('skeleton').height);}
+function resetCamera(){trackingData=null;handForces.clear();$('camera-button').innerHTML='Enable camera';$('camera-placeholder').hidden=false;$('camera-count').textContent=`Up to ${tracker.options.maxHands} hands`;$('tracking-hz').textContent='—';$('skeleton').getContext('2d').clearRect(0,0,$('skeleton').width,$('skeleton').height);}
 async function toggleCamera(){
-  if(tracker.active){tracker.stop();resetCamera();$('tracking-status').textContent='Kamera av';return;}
-  if(cameraStarting)return;cameraStarting=true;$('camera-button').disabled=true;$('tracking-status').textContent='Venter på kamera …';
-  try{await tracker.start();$('camera-placeholder').hidden=true;$('camera-button').innerHTML='Stopp kamera <span>×</span>';}
-  catch(error){resetCamera();$('tracking-status').textContent='Kamera utilgjengelig';notice(`Kamera kunne ikke starte: ${error.message}`);}
+  if(tracker.active){tracker.stop();resetCamera();$('tracking-status').textContent='Camera off';return;}
+  if(cameraStarting)return;cameraStarting=true;$('camera-button').disabled=true;$('tracking-status').textContent='Waiting for camera…';
+  try{await tracker.start();$('camera-placeholder').hidden=true;$('camera-button').innerHTML='Stop camera';}
+  catch(error){resetCamera();$('tracking-status').textContent='Camera unavailable';notice(`Could not start the camera: ${error.message}`);}
   finally{cameraStarting=false;$('camera-button').disabled=false;}
 }
 $('camera-button').onclick=toggleCamera;
-for(const [id,get,set] of [['pull-power',()=>pullPower,v=>pullPower=v],['push-power',()=>pushPower,v=>pushPower=v]]){
-  const sync=(editingExact=false)=>{
-    $(id).value=String(sliderFromForce(get()));
-    $(id+'-value').textContent=get().toFixed(3)+'×';
-    if(!editingExact)$(id+'-exact').value=get().toFixed(3);
-    $(id).setAttribute('aria-valuetext',get().toFixed(3)+'×');
-  };
-  sync();
-  $(id).oninput=e=>{set(forceFromSlider(e.target.value));sync();persist();};
-  $(id+'-exact').oninput=e=>{if(!Number.isFinite(e.target.valueAsNumber))return;set(clampForce(e.target.valueAsNumber));sync(true);persist();};
-  $(id+'-exact').onchange=()=>sync();
+$('copy-link').onclick=async()=>{persist();writeURL.flush();try{await navigator.clipboard.writeText(location.href);notice('Link copied: mode, song, position and settings. Music opens paused.');}catch{notice('Copy the address bar to share these settings.');}};
+function forceUI(){
+  $('force-power').value=String(sliderFromForce(pullPower));
+  $('force-power-value').textContent=pullPower.toFixed(3)+'×';
+  $('force-power').setAttribute('aria-valuetext',pullPower.toFixed(3)+'×');
 }
+forceUI();$('force-power').oninput=e=>{pullPower=pushPower=forceFromSlider(e.target.value);forceUI();persist();};
 $('resolution').value=engine.resolution;$('resolution').onchange=e=>{engine.resolution=e.target.value;engine.renderScale=1;engine.resize(true);adaptiveQuality.reset();persist();};
 $('max-hands').value=String(settings.maxHands);$('max-hands').onchange=async e=>{tracker.options.maxHands=Number(e.target.value);persist();if(tracker.active){tracker.stop();resetCamera();await toggleCamera();}};
 function audioUI(){
-  const mode=sound.mode;$('audio-status').textContent=mode==='demo'?'Demo':mode==='mic'?'Mikrofon':sound.element?.paused?'Lydfil · pauset':'Lydfil';
-  $('microphone').textContent=mode==='mic'?'◉ Stopp mikrofon':'◎ Mikrofon';$('play-audio').hidden=mode!=='file';
-  $('play-audio').textContent=sound.element?.paused?'Fortsett lydfil':'Pause lydfil';
-  const selected=$('track-select').value,loaded=loadedTrack()===selected,playing=loaded&&!sound.element.paused;
-  $('track-play').textContent=playing?'Ⅱ Pause valgt låt':'▶ Spill valgt låt';
-  $('track-state').textContent=loaded?(playing?'Spiller':'Lastet · pauset'):'Ikke lastet';
-  for(const link of document.querySelectorAll('[data-track-credit]'))link.hidden=link.dataset.trackCredit!==selected;
+  const mic=audioSelection.kind==='mic',file=audioSelection.kind==='file',youtube=audioSelection.kind==='youtube';
+  const playing=sound.mode==='file'&&!!sound.element&&!sound.element.paused;
+  $('audio-status').textContent=mic?(sound.mode==='mic'?'Listening':'Mic off'):playing?'Playing':'Paused';
+  $('track-select').hidden=mic||file||youtube;
+  $('youtube-panel').hidden=!youtube;$('youtube-button').setAttribute('aria-pressed',String(youtube));
+  $('library').setAttribute('aria-pressed',String(!mic&&!file&&!youtube));
+  $('microphone').setAttribute('aria-pressed',String(mic));
+  $('file-button').setAttribute('aria-pressed',String(file));
+  $('track-play').setAttribute('aria-label',mic?(sound.mode==='mic'?'Pause microphone':'Start microphone'):(playing?'Pause music':'Play music'));
+  $('track-play').innerHTML=mic?(sound.mode==='mic'?'Ⅱ Pause input':'▶ Start microphone'):(playing?'Ⅱ Pause':'▶ Play')+' <kbd>Space</kbd>';
+  const loaded=file||youtube?sound.mode==='file':loadedTrack()===$('track-select').value;
+  $('track-state').textContent=mic?'Live audio input':file||youtube?(audioSelection.name||'Audio file'):loaded?'Ready':'Choose a song';
+  for(const link of document.querySelectorAll('[data-track-credit]'))link.hidden=mic||file||youtube||link.dataset.trackCredit!==$('track-select').value;
+  $('audio-source-note').textContent=youtube?'Import audio for full frequency response. Music opens paused.':mic?'Microphone sound drives the visuals. It is never played back or recorded.':file?'Your file stays on this device. Choose Audio file again to replace it.':'Choose a song, then press play. Music always opens paused.';
 }
 // Library track currently held by the audio element, or null when another source (or nothing) is loaded.
 function loadedTrack(){return audioSelection.kind==='reference'&&sound.mode==='file'&&sound.element?audioSelection.track:null;}
@@ -94,42 +102,74 @@ async function loadLibraryTrack(id,{autoplay=false,position=0}={}){
   if(autoplay)await sound.context(); // resume inside the click gesture, before the fetch
   if(revision!==audioRevision)return false;
   const file=await loadTrackFile(track);if(revision!==audioRevision)return false;
-  if(!await sound.file(file,{autoplay,position}))return false;
+  if(!await sound.file(file,{autoplay,position})||revision!==audioRevision)return false;
   audioSelection={kind:'reference',track:track.id,name:file.name,position:sound.element.currentTime,playing:autoplay};attachAudio();
   return true;
 }
-$('microphone').onclick=async()=>{
-  audioRevision++;if(sound.mode==='mic'){sound.stop();audioSelection={kind:'demo',position:0,playing:false};audioUI();persist();return;}
-  $('microphone').disabled=true;try{if(await sound.microphone()){audioSelection={kind:'mic',position:0,playing:false};persist();}}catch(error){notice(error.message);}finally{$('microphone').disabled=false;audioUI();}
-};
+async function toggleMicrophone(){
+  audioRevision++;
+  if(sound.mode==='mic'){sound.stop();audioSelection={...audioSelection,kind:'mic',playing:false};audioUI();persist();return;}
+  $('microphone').disabled=true;
+  try{if(await sound.microphone()){audioSelection={...audioSelection,kind:'mic',position:0,playing:false};persist();}}
+  catch(error){notice(error.message);}finally{$('microphone').disabled=false;audioUI();}
+}
+$('microphone').onclick=()=>{if(audioSelection.kind==='mic')return;audioRevision++;sound.stop();audioSelection={...audioSelection,kind:'mic',position:0,playing:false};audioUI();persist();};
+$('library').onclick=async()=>{if(loadedTrack()===$('track-select').value)return;try{await loadLibraryTrack($('track-select').value);}catch(error){notice(error.message);}finally{audioUI();persist();}};
 $('track-select').onchange=async e=>{
-  audioUI();
-  try{await loadLibraryTrack(e.target.value);}catch(error){notice(error.message);}finally{audioUI();}
+  const selection=e.target.value;e.target.blur();pendingTrack=selection;persist();audioUI();
+  try{await loadLibraryTrack(selection);}catch(error){if(pendingTrack===selection&&loadedTrack())$('track-select').value=loadedTrack();notice(error.message);}finally{if(pendingTrack===selection)pendingTrack=null;audioUI();persist();}
 };
-$('track-play').onclick=async()=>{
-  const id=$('track-select').value,button=$('track-play');
+async function toggleAudio(){
+  const id=$('track-select').value;
+  if(transportBusy){transportToken++;audioRevision++;sound.silence();transportBusy=false;audioUI();persist();return;}
+  const token=++transportToken;transportBusy=true;
   try{
-    if(loadedTrack()===id){if(sound.element.paused)await playAudio();else sound.element.pause();}
-    else{button.disabled=true;await loadLibraryTrack(id,{autoplay:true});}
-  }catch(error){notice(error.message);}finally{button.disabled=false;audioUI();persist();}
-};
+    if(audioSelection.kind==='mic'){await toggleMicrophone();return;}
+    if(sound.mode==='file'&&sound.element){
+      if(sound.element.paused)await playAudio();else{audioRevision++;sound.silence();}
+    }else if(audioSelection.kind==='file'){notice('Choose your audio file again to play it.');$('audio-file').click();}
+    else if(audioSelection.kind==='youtube'){await loadYouTube();}
+    else{await loadLibraryTrack(id,{autoplay:true});}
+  }catch(error){notice(error.message);}finally{if(token===transportToken){transportBusy=false;audioUI();persist();}}
+}
+$('track-play').onclick=toggleAudio;
+// Known music-video links reuse the recordings already hosted with permission.
+const youtubeLibrary={'fpViZkhpPHk':'mitis-endeavors','lI5m0-oc9lI':'mitis-shattered','waOuUycRRYs':'mitis-wilderness','-1jPUB7gRyg':'aqua-doctor-jones','Jo2PuYWaNH8':'polyphony-mc-nugget-yodel'};
+let youtubeAbort=null;
+$('youtube-button').onclick=()=>{if(audioSelection.kind==='youtube')return;audioRevision++;sound.stop();audioSelection={...audioSelection,kind:'youtube',position:0,playing:false};$('youtube-url').value=audioSelection.youtube||'';audioUI();persist();};
+async function loadYouTube({position=0}={}){
+ const revision=++audioRevision;youtubeAbort?.abort();youtubeAbort=new AbortController();const controller=youtubeAbort;
+ const input=$('youtube-url').value;$('youtube-load').disabled=true;$('youtube-status').textContent='Preparing audio…';
+ try{
+  const videoId=parseYouTubeVideoId(input),known=youtubeLibrary[videoId];
+  const result=known?{file:await loadTrackFile(trackById(known)),videoId}:await importYouTubeAudio(input,{signal:controller.signal,onProgress:(received,total)=>{
+    if(revision===audioRevision)$('youtube-status').textContent=total?`Downloading audio · ${Math.round(received/total*100)}%`:`Downloading audio · ${(received/1048576).toFixed(1)} MB`;
+  }});
+  if(revision!==audioRevision)return;
+  if(await sound.file(result.file,{autoplay:false,position})&&revision===audioRevision){
+   audioSelection={kind:'youtube',youtube:videoId,track:known||audioSelection.track,name:result.title||result.file.name,position,playing:false};attachAudio();
+   $('youtube-status').textContent='Ready — full audio analysis. Press Play.';
+  }
+ }catch(error){if(revision===audioRevision&&error.name!=='AbortError'){$('youtube-status').textContent=error.message;notice(error.message);}}
+ finally{if(youtubeAbort===controller)$('youtube-load').disabled=false;if(revision===audioRevision){audioUI();persist();}}
+}
+$('youtube-load').onclick=()=>loadYouTube();
+$('youtube-url').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();void loadYouTube();}};
 $('file-button').onclick=()=>$('audio-file').click();
 $('audio-file').onchange=async e=>{
   const file=e.target.files[0],revision=++audioRevision;e.target.value='';if(!file)return;
-  try{if(await sound.file(file)){audioSelection={kind:'file',name:file.name,position:0,playing:true};attachAudio();
-    try{await cacheMusicFile(file);}catch{if(revision===audioRevision)notice('Lydfilen spiller, men nettleseren kunne ikke lagre den til neste lasting.');}
+  try{if(await sound.file(file,{autoplay:false})){audioSelection={kind:'file',name:file.name,position:0,playing:false};attachAudio();
+    try{await cacheMusicFile(file);}catch{if(revision===audioRevision)notice('Your file is loaded, but could not be saved for the next visit.');}
   }}catch(error){notice(error.message);}
 };
-$('stop-audio').onclick=()=>{audioRevision++;if(sound.element){audioSelection={...audioSelection,position:sound.element.currentTime,playing:false};}sound.silence();audioSelection.playing=false;audioUI();persist();};
-$('demo-audio').onclick=()=>{audioRevision++;sound.stop();audioSelection={kind:'demo',position:0,playing:false};audioUI();persist();};
 async function playAudio(){const revision=++audioRevision;await sound.context();if(revision!==audioRevision)return;await sound.element?.play();audioUI();persist();}
-$('play-audio').onclick=async()=>{if(!sound.element)return;try{if(sound.element.paused)await playAudio();else sound.element.pause();}catch(e){notice(e.message);}audioUI();persist();};
 async function restoreAudio(){
   const previous={...audioSelection},revision=audioRevision;
   try{
+    if(previous.kind==='youtube'&&previous.youtube){$('youtube-url').value=previous.youtube;await loadYouTube({position:previous.position});}
     if(previous.kind==='reference'||previous.kind==='file'){
       const file=previous.kind==='reference'?await loadTrackFile(trackById(resolveTrackId(previous.track))):await loadMusicFile();
-      if(revision!==audioRevision)return;if(!file)throw new Error('Den lagrede lydfilen finnes ikke lenger. Velg filen på nytt.');
+      if(revision!==audioRevision)return;if(!file)throw new Error('The saved audio file is unavailable. Choose it again.');
       if(await sound.file(file,{autoplay:false,position:previous.position})){attachAudio();
         // Reload/HMR restores the playhead only. Playback always needs an explicit click.
       }
@@ -140,51 +180,65 @@ async function restoreAudio(){
 }
 $('sensitivity').value=String(sound.gain);$('sensitivity-value').textContent=`${sound.gain.toFixed(1)}×`;
 $('sensitivity').oninput=e=>{sound.gain=Number(e.target.value);$('sensitivity-value').textContent=`${sound.gain.toFixed(1)}×`;persist();};
-const modeNames={plume:'Røyklys',duet:'Ild og is',smoke:'Røyk',ring:'Røykring',spectral:'Spektralrøyk',persistent:'Airbender',sculpture:'Lysformer',flight:'Flaksefugl'};
+const modeNames={'fluid-ring':'Fluid ring','plume-glow':'Smoke light · lasting glow',plume:'Smoke light · original',duet:'Fire & ice',smoke:'Fluid smoke',ring:'Particle ring',spectral:'Spectral smoke',persistent:'Airbender',sculpture:'Light shapes'};
 function modeUI(){
-  engine.persistent=physicsMode==='persistent';engine.flowMode=({smoke:1,ring:2,spectral:3,plume:4,duet:5})[physicsMode]||0;
+  engine.persistent=physicsMode==='persistent';engine.flowMode=({'fluid-ring':6,'plume-glow':7,smoke:1,ring:2,spectral:3,plume:4,duet:5})[physicsMode]||0;
   document.querySelectorAll('[data-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.mode===physicsMode)));
-  $('physics-mode').value=physicsMode;$('effect').hidden=physicsMode!=='sculpture';$('effect-label').hidden=physicsMode!=='sculpture';
-  $('mode-description').textContent={plume:'Tynne røykseil med fargede lyspulser fra valgt palett. Hendene samler, bøyer og skyver strømmen.',duet:'Varme oransje og isblå virvler. Foldede lysstrømmer som formes av hendene og musikken.',spectral:'Volumetrisk røyk. Bass skyter mot venstre, mellomtoner opp og diskant mot høyre. Hendene former strømmen.',smoke:'Varm røyk stiger gjennom et simulert væskefelt. Hendene trekker, skyver og virvler røyken.',ring:'En ring sender røyk utover. Hendene bøyer strømmene og lager virvler.',persistent:'Samle lyset i neven. Åpne hånden og send det av gårde.',sculpture:'Musikken former lyset. Hendene trekker og skyver.',flight:'Du er en partikkel med flygedrømmer. Løft begge hender, slå dem ned og fly over hustakene — under fuglene. ↑ eller klikk flakser også.'}[physicsMode];
-  const flying=physicsMode==='flight';$('flight-scene').hidden=!flying;$('flight-hud').hidden=!flying;
-  document.body.classList.toggle('flight-mode',flying);$('particles').disabled=flying||physicsMode==='smoke';if(flying)flight.reset();countUI();
+  $('effect').hidden=physicsMode!=='sculpture';$('effect-label').hidden=physicsMode!=='sculpture';
+  $('mode-description').textContent={'fluid-ring':'Nine outward smoke jets. Bass starts at the upper left; higher frequencies follow clockwise.','plume-glow':'Always-smoking ribbons. Notes light up new smoke; each patch carries its glow, then fades.',plume:'The original luminous smoke ribbons, with music-driven flashes.',duet:'Twin streams of warm and cool light, shaped by your hands and music.',spectral:'Layered smoke and fine particles. Bass moves left, mids rise, treble moves right.',smoke:'Buoyant smoke rises and folds. Use your hands to stir the flow.',ring:'The original outward-flowing particle ring. Bend the streams with your hands.',persistent:'Gather light in a closed hand. Open your hand to send it flying.',sculpture:'Music shapes the light. Your hands pull and push it.'}[physicsMode];
+  $('particles').disabled=['smoke','fluid-ring'].includes(physicsMode);countUI();modeSettingsUI();
 }
+function modeSettingsUI(){
+ engine.modeSettings=modeSettings[physicsMode];
+ $('mode-settings-label').textContent=modeNames[physicsMode]+' settings';
+ for(const key of ['speed','glow','turbulence','emission']){
+  const value=engine.modeSettings[key];$('mode-'+key).value=value;$('mode-'+key+'-value').textContent=value.toFixed(2)+'×';
+ }
+ $('mode-turbulence-control').hidden=!['smoke','fluid-ring'].includes(physicsMode);
+ $('mode-emission-control').hidden=!['smoke','fluid-ring','plume','plume-glow'].includes(physicsMode);
+}
+for(const key of ['speed','glow','turbulence','emission'])$('mode-'+key).oninput=e=>{modeSettings[physicsMode][key]=Number(e.target.value);modeSettingsUI();engine.dirty=true;persist();};
+addEventListener('pointermove',e=>{
+ const active=!e.target.closest('button,input,select,textarea,a,.panel,header,footer,video');
+ engine.mouse=[(2*e.clientX/innerWidth-1)*(innerWidth/innerHeight),1-2*e.clientY/innerHeight,.18,active?1:0];
+});
+document.addEventListener('pointerleave',()=>{engine.mouse=[0,0,.18,0];});
+addEventListener('blur',()=>{engine.mouse=[0,0,.18,0];});
 function selectMode(mode){physicsMode=mode;adaptiveQuality.reset();modeUI();persist();}
-$('physics-mode').onchange=e=>{selectMode(e.target.value);e.target.blur();};
-document.querySelectorAll('[data-mode]').forEach(button=>button.onclick=()=>selectMode(button.dataset.mode));
+document.querySelectorAll('[data-mode]').forEach(button=>button.onclick=e=>{selectMode(button.dataset.mode);if(e.detail)button.blur();});
 modeUI();
 $('effect').value=String(engine.effect);$('effect').onchange=e=>{engine.effect=Number(e.target.value);persist();};
-function countUI(){$('particles').value=autoCount?'auto':String(engine.count);$('particle-label').textContent=physicsMode==='flight'?'1 partikkel · store drømmer':physicsMode==='smoke'?'Røyk · væskesimulering':`${engine.count.toLocaleString('nb-NO')} ${autoCount?'· auto':'partikler'}`;}
+function countUI(){$('particles').value=autoCount?'auto':String(engine.count);$('particle-label').textContent=['smoke','fluid-ring'].includes(physicsMode)?'Fluid simulation':`${engine.count.toLocaleString('en-GB')} ${autoCount?'· auto':'particles'}`;}
 $('particles').onchange=e=>{autoCount=e.target.value==='auto';if(!autoCount)engine.count=Number(e.target.value);adaptiveQuality.reset();countUI();persist();};countUI();
 function paletteUI(){document.querySelectorAll('[data-palette]').forEach(b=>{const active=Number(b.dataset.palette)===engine.palette;b.classList.toggle('selected',active);b.setAttribute('aria-pressed',String(active));});}
 document.querySelectorAll('[data-palette]').forEach(button=>button.onclick=()=>{engine.palette=Number(button.dataset.palette);paletteUI();persist();});paletteUI();
-function pauseUI(){$('pause').textContent=paused?'▶':'Ⅱ';$('pause').setAttribute('aria-label',paused?'Start partikler':'Sett partikler på pause');}
+function pauseUI(){$('pause').textContent=paused?'Resume scene':'Freeze scene';$('pause').setAttribute('aria-label',paused?'Resume scene':'Freeze scene');}
 $('pause').onclick=()=>{paused=!paused;pauseUI();persist();};pauseUI();
 $('burst').onclick=()=>{if(paused){paused=false;pauseUI();}engine.explode();persist();};
 function setImmersive(active){document.body.classList.toggle('immersive',active);engine.fill=active?1:0;persist();}
 async function toggleFullscreen(){
   if(document.fullscreenElement||document.body.classList.contains('immersive')){if(document.fullscreenElement)await document.exitFullscreen();setImmersive(false);}
-  else {setImmersive(true);try{await document.documentElement.requestFullscreen();}catch{setImmersive(false);notice('Nettleseren tillot ikke fullskjerm. Trykk H for å skjule kontrollene.');}}
+  else {setImmersive(true);try{await document.documentElement.requestFullscreen();}catch{setImmersive(false);notice('Fullscreen was blocked. Press H to hide the controls.');}}
 }
 addEventListener('dblclick',event=>{
   if(event.target.closest('button,input,select,textarea,a,.panel,video'))return;
   event.preventDefault();void toggleFullscreen();
 });
-$('immersive').onclick=toggleFullscreen;$('fullscreen').onclick=toggleFullscreen;
+$('immersive').onclick=toggleFullscreen;
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement)setImmersive(false);});
 setImmersive(settings.immersive);
 addEventListener('keydown',e=>{
-  if(e.repeat||['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)||document.activeElement.isContentEditable)return;
-  if(e.code==='ArrowUp'&&physicsMode==='flight'){e.preventDefault();flight.flap();}
-  if(e.code==='Space'){e.preventDefault();void toggleFullscreen();}
-  if(e.key.toLowerCase()==='m'){e.preventDefault();if(sound.mode==='file'&&sound.element)$('play-audio').click();else $('track-play').click();}
-  if(e.key.toLowerCase()==='b')$('burst').click();
-  if(e.key.toLowerCase()==='h')setImmersive(!document.body.classList.contains('immersive'));
-  if(e.key==='Escape')setImmersive(false);
+  const action=shortcutAction(e,document.activeElement);if(!action)return;
+  e.preventDefault();
+  if(action==='music')void toggleAudio();
+  if(action==='fullscreen')void toggleFullscreen();
+  if(action==='burst')$('burst').click();
+  if(action==='hide')setImmersive(!document.body.classList.contains('immersive'));
+  if(action==='escape')setImmersive(false);
 });
 let resizePending=false;addEventListener('resize',()=>{resizePending=true;});
 const saveTimer=setInterval(persist,1000);
-function teardown(){persist();shuttingDown=true;clearInterval(saveTimer);clearTimeout(noticeTimer);cancelAnimationFrame(raf);tracker.stop();sound.stop();sound.ctx?.close();engine.dispose();}
+function teardown(){youtubeAbort?.abort();persist();writeURL.flush();shuttingDown=true;clearInterval(saveTimer);clearTimeout(noticeTimer);cancelAnimationFrame(raf);tracker.stop();sound.stop();sound.ctx?.close();engine.dispose();}
 addEventListener('pagehide',teardown,{once:true});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)persist();});
 let last=0,lastUI=0,frames=[],raf=0;
@@ -192,23 +246,24 @@ function frame(now){
   raf=requestAnimationFrame(frame);if(!ready||document.hidden){last=now;return;}if(resizePending){engine.resize();resizePending=false;}
   const dt=last?(now-last)/1000:1/60;last=now;
   const hands=tracker.active?handForces.sample(now):[];
-  handMarkers.forEach((node,index)=>{const hand=hands[index];node.hidden=!hand;if(hand){node.style.left=`${(hand.x/(innerWidth/innerHeight)+1)*50}%`;node.style.top=`${(1-hand.y)*50}%`;node.classList.toggle('repel',hand.mode<0);node.firstChild.textContent=hand.mode<0?'Skyv':'Trekk';}});
+  handMarkers.forEach((node,index)=>{const hand=hands[index];node.hidden=!hand;if(hand){node.style.left=`${(hand.x/(innerWidth/innerHeight)+1)*50}%`;node.style.top=`${(1-hand.y)*50}%`;node.classList.toggle('repel',hand.mode<0);node.firstChild.textContent=hand.mode<0?'Push':'Pull';}});
   engine.musicActive=sound.mode==='mic'||(sound.mode==='file'&&!!sound.element&&!sound.element.paused);
-  const audio=sound.sample(now/1000);engine.musicTransient=sound.transient;engine.emissionBands=sound.emissionBands;audio[3]=Math.max(audio[3],sound.transient*.8);
-  // Hands are the only force sources in every mode. No body joints or invisible demo attractor.
+  const audio=sound.sample(now/1000);engine.audioResponse=sound.gain;engine.musicTransient=sound.transient;engine.emissionBands=sound.emissionBands;engine.ringBands=sound.ringSpectrum.levels;engine.ringAttacks=sound.ringSpectrum.attacks;audio[3]=Math.max(audio[3],sound.transient*.8);
+  // Hand pull/push is separate from the mouse obstacle; body joints never attract.
   const forces=hands.map(hand=>[hand.x,hand.y,hand.strength*(hand.strength<0?pushPower:pullPower),engine.persistent?.95:.65]);
-  if(autoCount&&!paused&&physicsMode!=='flight'&&physicsMode!=='smoke'){const quality=adaptiveQuality.update(dt,engine.count,engine.renderScale,tracker.active&&tracker.backend==='GPU'?tracker.ms:0);if(quality){engine.count=quality.count;engine.renderScale=engine.resolution==='auto'?quality.scale:1;countUI();}}
-  if(physicsMode==='flight'){flight.frame(dt,hands,paused,document.body.classList.contains('immersive'));}else engine.frame(dt,audio,forces,paused);frames.push(dt*1000);if(frames.length>90)frames.shift();
+  if(autoCount&&!paused&&!['smoke','fluid-ring'].includes(physicsMode)){const quality=adaptiveQuality.update(dt,engine.count,engine.renderScale,tracker.active&&tracker.backend==='GPU'?tracker.ms:0);if(quality){engine.count=quality.count;engine.renderScale=engine.resolution==='auto'?quality.scale:1;countUI();}}
+  engine.frame(dt,audio,forces,paused);frames.push(dt*1000);if(frames.length>90)frames.shift();
   if(now-lastUI>150){
-    lastUI=now;if(physicsMode==='flight'){$('flight-score').textContent=`${Math.floor(flight.distance)} m`; $('flight-message').textContent=flight.message;} $('track-time').hidden=sound.mode!=='file';
+    lastUI=now; $('track-time').hidden=sound.mode!=='file';
     if(sound.element){const format=t=>`${Math.floor(t/60)}:${String(Math.floor(t%60)).padStart(2,'0')}`;$('track-time').textContent=`${format(sound.element.currentTime)} / ${Number.isFinite(sound.element.duration)?format(sound.element.duration):'…'}`;}
-    const mean=frames.reduce((a,b)=>a+b,0)/frames.length;$('fps').textContent=paused?'pause':String(Math.round(1000/mean));$('frame-ms').textContent=mean.toFixed(1);
+    const mean=frames.reduce((a,b)=>a+b,0)/frames.length;$('fps').textContent=paused?'paused':String(Math.round(1000/mean));$('frame-ms').textContent=mean.toFixed(1);
     $('tracking-hz').textContent=tracker.active&&now-trackingTime<500?tracker.hz.toFixed(1):'—';
-    $('tracking-detail').textContent=tracker.active?`${Math.round(tracker.ms)} ms analyse · ${Math.round(tracker.latency||0)} ms forsinkelse · ${tracker.backend||'…'} · kamera ${Math.round(tracker.cameraFps||0)} Hz`:'—';
-    $('mode-label').textContent=`${modeNames[physicsMode]} · ${sound.mode==='demo'?'syntetisk puls':sound.mode==='mic'?'mikrofon':'lydfil'}`;
-    bars.forEach((bar,i)=>bar.style.height=`${Math.max(5,sound.bins[i*8]/255*100)}%`);
+    $('tracking-detail').textContent=tracker.active?`${Math.round(tracker.ms)} ms analysis · ${Math.round(tracker.latency||0)} ms latency · ${tracker.backend||'…'} · camera ${Math.round(tracker.cameraFps||0)} Hz`:'—';
+    $('mode-label').textContent=`${modeNames[physicsMode]} · ${sound.mode==='demo'?'silent demo':sound.mode==='mic'?'microphone':'audio'}`;
+    const levels=sound.mode==='demo'?audio:[sound.emissionBands[0],(sound.emissionBands[1]+sound.emissionBands[2])*.5,(sound.emissionBands[3]+sound.emissionBands[4])*.5,(sound.emissionBands[5]+sound.emissionBands[6])*.5];
+    bars.forEach((bar,i)=>bar.style.height=`${Math.max(5,(engine.musicActive?levels[i]:0)*100)}%`);
   }
 }
 void restoreAudio();
-try{await engine.init();adaptiveQuality.maxCount=engine.capacity;engine.count=Math.min(engine.count,engine.capacity);for(const option of $('particles').options){if(option.value!=='auto')option.disabled=Number(option.value)>engine.capacity;}countUI();ready=true;$('gpu-error').hidden=true;$('gpu-error-message').textContent='';$('gpu-status').textContent='WebGPU aktiv';void toggleCamera();raf=requestAnimationFrame(frame);}catch(error){gpuError(error.message);}
+try{await engine.init();adaptiveQuality.maxCount=engine.capacity;engine.count=Math.min(engine.count,engine.capacity);for(const option of $('particles').options){if(option.value!=='auto')option.disabled=Number(option.value)>engine.capacity;}countUI();ready=true;$('gpu-error').hidden=true;$('gpu-error-message').textContent='';$('gpu-status').textContent='WebGPU active';void toggleCamera();raf=requestAnimationFrame(frame);}catch(error){gpuError(error.message);}
 if(import.meta.hot)import.meta.hot.dispose(teardown);

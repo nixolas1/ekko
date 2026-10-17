@@ -18,6 +18,10 @@ struct Parameters {
   simulation: vec4f, // mode: 0 sculpture, 1 persistent, 2 smoke, 3 ring, 4 volume, 5 plume, 6 duet; audible input active, onset envelope, reserved
   emissionLow: vec4f, // seven measured bands: bass to treble
   emissionHigh: vec4f,
+  ringLevels: array<vec4f,3>, // nine ascending frequency bands
+  ringAttacks: array<vec4f,3>, // independently decaying note attacks
+  mouse: vec4f, // world xy, radius, active
+  tuning: vec4f, // speed, turbulence, glow, emission
 }
 const TAU = 6.2831853;
 fn pcg(v: u32) -> u32 {
@@ -58,4 +62,13 @@ fn emissionLevel(lane: u32, low: vec4f, high: vec4f) -> f32 {
   let i=min(lane,6u);
   if (i<4u) { return low[i]; }
   return high[i-4u];
+}
+
+// Soft mouse obstacle: compact support, maximum repulsion at its centre.
+fn mouseVelocity(q:vec2f,v:vec2f,mouse:vec4f,dt:f32)->vec2f {
+  let delta=q-mouse.xy;let distance=length(delta);let radius=max(mouse.z,.001);
+  if(mouse.w<.5 || distance>=radius || dt<=0.0){return v;}
+  let n=select(vec2f(1,0),delta/max(distance,.00001),distance>.00001);
+  let falloff=pow(1.0-distance/radius,2.0);
+  return v+n*max(0.0,2.4*falloff-dot(v,n))*(1.0-exp(-dt*35.0));
 }

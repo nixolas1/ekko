@@ -161,3 +161,14 @@ test('smoke mode runs the fluid solver, bypasses particle work and freezes densi
     assert.equal(log.textures.length,allocations,'particle amount cannot reset fluid density');
   });
 });
+
+test('fluid ring and lasting-glow plume use separate modes and carry nine bands without changing legacy modes',async()=>{
+ await withEngine((engine,log)=>{
+  engine.flowMode=6;engine.ringBands=[.1,.2,.3,.4,.5,.6,.7,.8,.9];engine.ringAttacks=[1,0,0,0,0,0,0,0,.5];engine.frame(1/60,[0,0,0,0],[],false);
+  assert.equal(simulationMode(log),7);assert(entries(log).includes('advectLight'));assert(entries(log).includes('fluidFragment'));assert(!entries(log).includes('simulate'));
+  const u=log.uniforms.at(-1);for(let i=0;i<9;i++)assert(Math.abs(u[324+i]-engine.ringBands[i])<1e-6);assert.equal(u[344],.5);
+  engine.flowMode=7;log.passes.length=0;engine.frame(1/60,[0,0,0,0],[],false);
+  assert.equal(simulationMode(log),8);assert(entries(log).includes('referenceFragment'));assert(!entries(log).includes('advectLight'));
+  engine.flowMode=4;engine.frame(1/60,[0,0,0,0],[],false);assert.equal(simulationMode(log),5);
+ });
+});

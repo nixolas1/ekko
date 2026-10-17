@@ -12,7 +12,7 @@
 struct RefCurl { potential: vec3f, curl: vec3f }
 struct RefBundle { center: vec3f, axis: vec3f, size: vec2f } // size: ring radius, core width
 
-fn refLife(id: u32, mode: f32) -> f32 { return select(6.5 + 3.0 * rnd(id, 51u), 9.0 + 4.0 * rnd(id, 51u), mode > 5.5); }
+fn refLife(id: u32, mode: f32) -> f32 { return select(6.5 + 3.0 * rnd(id, 51u), 9.0 + 4.0 * rnd(id, 51u), (mode > 5.5 && mode < 6.5)); }
 fn refSide(id: u32) -> u32 { return select(0u, 1u, rnd(id, 50u) < 0.55); }
 fn refFit() -> f32 { return clamp(params.clock.z / 1.6, 0.6, 1.1); }
 // Same horizontal centring as the sculptures: shifted right of the intro, centred when filling the scene.
@@ -193,12 +193,12 @@ fn refVortexFlow(q: vec3f, t: f32) -> vec3f {
 // ---------------------------------------------------------------- shared lifecycle
 
 fn refField(q: vec3f, t: f32, mode: f32) -> vec3f {
-  if (mode > 5.5) { return refVortexFlow(q, t); }
+  if ((mode > 5.5 && mode < 6.5)) { return refVortexFlow(q, t); }
   return refPlumeFlow(q, t);
 }
 fn refOrigin(id: u32, u: f32, mode: f32, key: u32, t: f32) -> vec3f {
   let jitter = (vec3f(rnd(key, 44u), rnd(key, 45u), rnd(key, 46u)) - vec3f(0.5)) * 0.004;
-  if (mode > 5.5) {
+  if ((mode > 5.5 && mode < 6.5)) {
     // A small circle on the jet axis, behind each ring: a closed line source, so the streak surface is a tube
     // that the ring rolls up into nested sheets.
     let fit = refFit();
@@ -213,11 +213,11 @@ fn refSpawn(id: u32, mode: f32, warm: bool) -> Particle {
   let t = params.clock.x;
   let key = id ^ pcg(u32(t * 71.0) + u32(mode) * 7919u);
   let life = refLife(id, mode);
-  let gated = mode < 5.5 && params.simulation.y > 0.5;
+  let gated = (mode < 5.5 || mode > 7.5) && params.simulation.y > 0.5;
   let warmStart = warm && !gated;
   var u = rnd(key, 41u);
   // Mode 5 favours the lit middle of the emitter, leaving dark gaps at the ends.
-  if (mode < 5.5 && rnd(key, 40u) < 0.4) { u = clamp(0.42 + (rnd(key, 42u) + rnd(key, 43u) + u - 1.5) * 0.2, 0.0, 1.0); }
+  if ((mode < 5.5 || mode > 7.5) && rnd(key, 40u) < 0.4) { u = clamp(0.42 + (rnd(key, 42u) + rnd(key, 43u) + u - 1.5) * 0.2, 0.0, 1.0); }
   // Staggered waits change the birth rate with loudness; without music the plume stays well fed.
   var age = -rnd(key, 36u) * 0.9 / (0.6 + clamp(params.sound.w, 0.0, 1.0) * 2.0);
   if (warmStart) { age = rnd(id, 37u) * life * 0.95; }
@@ -236,9 +236,10 @@ fn refSpawn(id: u32, mode: f32, warm: bool) -> Particle {
     }
   }
   var w = 0.0;
-  if (mode < 5.5) {
+  if ((mode < 5.5 || mode > 7.5)) {
     let lamp = refLamps(u, birth);
     w = round(clamp(lamp.y, 0.0, 1.0) * 7.0) + min(lamp.x * 0.5, 0.999);
+    if(mode>7.5){w=0.0;}
   } else if (warmStart) {
     let m = refMeet(t);
     let dm = (q.x - m.x) / (0.3 * refFit());
@@ -256,14 +257,15 @@ fn simulateReference(id: u32, old: Particle) -> Particle {
   let invalid = !all(abs(p.position) < vec4f(8.0, 8.0, 8.0, 16.0)) || !all(abs(p.velocity) < vec4f(60.0)) || !all(abs(p.extra) < vec4f(2.0, 100.0, 60.0, 60.0));
   if (p.state.w < 0.5 || p.state.z != mode || invalid) { p = refSpawn(id, mode, true); }
   if (dt == 0.0) { return p; }
-  if (mode < 5.5 && params.simulation.y > 0.5 && p.extra.y < 0.0) {
+  if ((mode < 5.5 || mode > 7.5) && params.simulation.y > 0.5 && p.extra.y < 0.0) {
     let band=emissionLevel(id % 7u,params.emissionLow,params.emissionHigh);
     let strength=smoothstep(.06,.85,band);
-    let chance=1.0-exp(-strength*strength*strength*dt*3.5);
+    let chance=1.0-exp(-(strength*strength*strength*3.5+select(0.0,.16,mode>7.5))*params.tuning.w*dt);
     if (rnd(id ^ pcg(u32(t*1000.0)),63u) >= chance) { return p; }
     p.extra.y=0.0;
     let lamp=refLamps(p.extra.x,t);
     p.position.w=round(clamp(lamp.y,0.0,1.0)*7.0)+min(lamp.x*.5,.999);
+    if(mode>7.5){p.position.w=min(strength*.65,.999);}
   }
   p.extra.y += dt;
   if (p.extra.y < 0.0) { return p; }
@@ -301,9 +303,10 @@ fn simulateReference(id: u32, old: Particle) -> Particle {
   var impulse = v - flowV;
   impulse *= min(1.0, 3.0 / max(length(impulse), 0.001));
   v = flowV + impulse;
+  v=vec3f(mouseVelocity(q.xy,v.xy,params.mouse,dt),v.z);
   q += v * dt * (0.85 + clamp(params.sound.w, 0.0, 1.0) * 0.6);
   var w = p.position.w;
-  if (mode > 5.5) {
+  if ((mode > 5.5 && mode < 6.5)) {
     // Smoke drifting into the meeting zone gradually turns olive, as where the two colours mix in the reference.
     let m = refMeet(t);
     let dm = (q.x - m.x) / (0.3 * refFit());

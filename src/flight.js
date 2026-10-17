@@ -17,7 +17,7 @@ export class WingFlaps {
 }
 export class FlightWorld {
   constructor(random=Math.random){this.random=random;this.reset();}
-  reset(){this.y=.42;this.vy=0;this.distance=0;this.time=0;this.started=false;this.crash=0;this.flapTime=0;this.cooldown=0;this.buildings=[];this.birds=[];this.nextBuilding=0;this.nextBird=2;this.message='Løft hendene og slå dem ned · ↑ eller klikk flakser også';}
+  reset(){this.y=.42;this.vy=0;this.distance=0;this.time=0;this.started=false;this.crash=0;this.flapTime=0;this.cooldown=0;this.buildings=[];this.birds=[];this.nextBuilding=0;this.nextBird=2;this.message='Raise your hands, then flap down. ↑ or click also flaps.';}
   flap(){if(this.crash>0||this.cooldown>0)return false;this.started=true;this.vy=-.34;this.flapTime=.28;this.cooldown=.13;return true;}
   update(dt,width=1.5){
     dt=Math.min(.04,Math.max(0,dt));this.time+=dt;this.flapTime=Math.max(0,this.flapTime-dt);this.cooldown=Math.max(0,this.cooldown-dt);
@@ -34,7 +34,7 @@ export class FlightWorld {
     this.buildings=this.buildings.filter(b=>b.x+b.w>-.2);this.birds=this.birds.filter(b=>b.x>-.2);
     const roof=this.buildings.some(b=>px+r>b.x&&px-r<b.x+b.w&&this.y+r>1-b.h);
     const bird=this.birds.some(b=>Math.abs(px-b.x)<.055&&Math.abs(this.y-(b.y+Math.sin(this.time*2+b.phase)*.018))<.035);
-    if(roof||bird||this.y> .97){this.crash=1.4;this.message=bird?'Poff! Vikeplikt for fugl. Prøv igjen …':'Poff! Partikler er dårlige taktekkere. Prøv igjen …';}
+    if(roof||bird||this.y> .97){this.crash=1.4;this.message=bird?'Poof! Birds have right of way. Try again…':'Poof! Particles make poor roofers. Try again…';}
     else this.message='Over hustakene. Under fuglene. Flaks!';
   }
 }

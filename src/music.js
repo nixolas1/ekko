@@ -19,6 +19,6 @@ export const resolveTrackId = id => (trackById(id) ? id : DEFAULT_TRACK_ID);
 
 export async function loadTrackFile(track, fetchImpl = globalThis.fetch) {
   const response = await fetchImpl(track.src);
-  if (!response.ok) throw new Error(`«${trackLabel(track)}» finnes ikke lokalt`);
+  if (!response.ok) throw new Error(`«${trackLabel(track)}» is unavailable`);
   return new File([await response.blob()], trackFileName(track), { type: 'audio/webm' });
 }

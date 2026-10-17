@@ -10,7 +10,7 @@ const MAX_PARTICLES=3145728,PARTICLE_BYTES=64,MAX_FORCES=32,MAX_BURSTS=8,MAX_QUE
 // Spectral smoke volume: grid mirrors VX/VY/VZ in volume.wgsl. At most VOLUME_SPLATS particles are splatted per
 // frame (every stride-th one, weighted up), which bounds both the atomic cost and the fixed point range.
 const VOLUME_GRID=[96,64,48],VOLUME_SPLATS=262144,VOLUME_DEPTH=.8,CAMERA_DISTANCE=1/.35,SPECTRAL_MODE=4;
-const UNIFORM_FLOATS=324; // layout mirrors Parameters in common-shader.wgsl
+const UNIFORM_FLOATS=356; // layout mirrors Parameters in common-shader.wgsl
 const SCENE_FORMAT='rgba16float';
 const PREFIX=commonCode+'\n',PREFIX_LINES=PREFIX.split('\n').length-1;
 const clamp=(v,lo,hi)=>Math.min(hi,Math.max(lo,v));
@@ -27,19 +27,19 @@ export class ParticleEngine {
     this.volumeData=new Float32Array(12); this.noiseReady=false;
   }
   async init() {
-    if (!navigator.gpu) throw new Error('WebGPU er ikke tilgjengelig. Bruk en oppdatert nettleser med WebGPU og maskinvareakselerasjon, på localhost eller HTTPS.');
+    if (!navigator.gpu) throw new Error('WebGPU is unavailable. Use an up-to-date browser with hardware acceleration on localhost or HTTPS.');
     const adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'});
-    if (!adapter) throw new Error('Fant ingen WebGPU-adapter. Kontroller maskinvareakselerasjon og GPU-støtte.');
+    if (!adapter) throw new Error('No WebGPU adapter found. Check hardware acceleration and GPU support.');
     this.adapterName=adapter.info?.description||adapter.info?.vendor||'';
     const wantedBytes=MAX_PARTICLES*PARTICLE_BYTES;
     const supportedBytes=Math.min(adapter.limits?.maxStorageBufferBindingSize??wantedBytes,adapter.limits?.maxBufferSize??wantedBytes);
     this.capacity=Math.min(MAX_PARTICLES,Math.floor(supportedBytes/PARTICLE_BYTES/16384)*16384);
     const bytes=this.capacity*PARTICLE_BYTES;
     this.device=await adapter.requestDevice({requiredLimits:{maxStorageBufferBindingSize:bytes,maxBufferSize:bytes}});
-    this.device.lost.then(info=>{if(info.reason!=='destroyed')this.report(`GPU-forbindelsen ble brutt: ${info.message}. Last siden på nytt.`);});
+    this.device.lost.then(info=>{if(info.reason!=='destroyed')this.report(`GPU connection lost: ${info.message}. Reload the page.`);});
     this.device.addEventListener('uncapturederror',event=>this.report(event.error.message));
     this.context=this.canvas.getContext('webgpu');
-    if (!this.context) throw new Error('Nettleseren kunne ikke opprette WebGPU-kontekst.');
+    if (!this.context) throw new Error('The browser could not create a WebGPU context.');
     const format=navigator.gpu.getPreferredCanvasFormat();
     this.context.configure({device:this.device,format,alphaMode:'opaque'});
     // Validation errors raised while creating resources and bind groups surface here instead of on the first frame.
@@ -191,16 +191,18 @@ export class ParticleEngine {
     const count=clamp(Math.floor(Number(this.count))||131072,1,this.capacity);
     const effect=clamp(Math.round(Number(this.effect))||0,0,3),fill=clamp(Number(this.fill)||0,0,1);
     const real=clamp(Number.isFinite(dt)?dt:1/60,0,.1);
-    const step=paused?0:Math.min(real,.033);
+    const tuning=this.modeSettings||{};
+    const speed=clamp(Number(tuning.speed)||1,.25,2);
+    const step=paused?0:Math.min(real*speed,.033);
     const list=[];
     for (const f of forces||[]) { if(list.length>=MAX_FORCES)break; if(f&&Number.isFinite(f[0])&&Number.isFinite(f[1])&&Number.isFinite(f[2])&&Number.isFinite(f[3]))list.push(f); }
     // Pause freezes the clock, the force trackers and the burst queue; queued bursts fire after resume.
     let drained=[];
-    if (!paused) { this.time+=real; this.clock+=real; drained=this.pending.splice(0,MAX_BURSTS); }
+    if (!paused) { this.time+=real*speed; this.clock+=real*speed; drained=this.pending.splice(0,MAX_BURSTS); }
     const velocities=paused?this.tracked:this.trackForces(list,real);
     const before=this.served;
     if (drained.length) this.served=drained[drained.length-1].serial;
-    const mode=this.flowMode===1?2:this.flowMode===2?3:this.flowMode===3?SPECTRAL_MODE:this.flowMode===4?5:this.flowMode===5?6:this.persistent?1:0;
+    const mode=this.flowMode===1?2:this.flowMode===2?3:this.flowMode===3?SPECTRAL_MODE:this.flowMode===4?5:this.flowMode===5?6:this.flowMode===6?7:this.flowMode===7?8:this.persistent?1:0;
     const smoke=mode===SPECTRAL_MODE;
     if (smoke&&!this.volumeGroups) this.buildVolumeTargets();
     const modeChanged=mode!==this.lastMode;
@@ -211,21 +213,27 @@ export class ParticleEngine {
     const fresh=this.dirty||paused||signature!==this.signature;
     d.fill(0);
     d.set([this.time,step,this.canvas.width/this.canvas.height,count],0);
+    if(mode===7)d[3]=Math.min(this.capacity,262144);
     d.set([0,1,2,3].map(i=>clamp(Number(audio?.[i])||0,0,1.5)),4);
     d.set([Number(this.palette)||0,this.sceneSize[0],this.sceneSize[1],list.length,...this.burst.slice(0,2),this.served,before],8);
     list.forEach((f,i)=>d.set([f[0],f[1],f[2],f[3]],16+i*4));
     if (!paused) velocities.slice(0,list.length).forEach((v,i)=>d.set([v.vx,v.vy],184+i*4));
     d.set([effect,fill,Math.pow(131072/count,.55),clamp(real*60,.3,2.5)],144);
     d.set([drained.length,fresh?0:Math.exp(-real/Math.max(.02,Number(this.trail)||.14)),Math.max(0,Number(this.exposure)||0),Math.max(0,Number(this.bloom)||0)],148);
-    d.set([mode,this.musicActive?1:0,clamp(Number(this.musicTransient)||0,0,1),0],312);
+    d.set([mode,this.musicActive?1:0,clamp(Number(this.musicTransient)||0,0,1),clamp(Number(this.audioResponse)||1.2,.3,3)],312);
     const emission=this.emissionBands||[audio?.[0],audio?.[0],audio?.[1],audio?.[1],audio?.[1],audio?.[2],audio?.[2]];
     d.set(Array.from({length:7},(_,i)=>clamp(Number(emission[i])||0,0,1)),316);
+    const ring=this.ringBands||[emission[0],emission[1],emission[2],emission[3],emission[4],emission[4],emission[5],emission[6],emission[6]];
+    d.set(Array.from({length:9},(_,i)=>clamp(Number(ring[i])||0,0,1)),324);
+    d.set(Array.from({length:9},(_,i)=>clamp(Number(this.ringAttacks?.[i])||0,0,1)),336);
+    d.set(this.mouse||[0,0,.18,0],348);
+    d.set([speed,...['turbulence','glow','emission'].map(key=>clamp(Number.isFinite(tuning[key])?tuning[key]:1,0,3))],352);
     drained.forEach((b,i)=>d.set([b.x,b.y,b.serial,b.strength],152+i*4));
     device.queue.writeBuffer(this.uniform,0,d);
     const stride=Math.ceil(count/VOLUME_SPLATS);
     if (smoke) this.writeVolume(count,stride);
     const encoder=device.createCommandEncoder();
-    if (mode===2) {
+    if (mode===2 || mode===7) {
       this.fluid.allocate(this.canvas.width/this.canvas.height,modeChanged);
       if (!paused && step>0) this.fluid.step(encoder);
       if (redraw) {

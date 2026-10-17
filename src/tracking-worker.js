@@ -25,7 +25,7 @@ async function init(options = {}) {
     self.postMessage({ type: 'ready', backend });
   } catch (error) {
     hands?.close(); hands = undefined;
-    fail(`Kunne ikke laste sporingsmodellene: ${describe(error)}`, true);
+    fail(`Could not load tracking models: ${describe(error)}`, true);
   } finally { initializing = false; }
 }
 
