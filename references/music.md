@@ -1,5 +1,9 @@
 # Musikk fra referansevideoen
 
+## Publisering — 18. oktober 2026
+
+Eieren har uttrykkelig bekreftet tillatelse til å hoste de fem nåværende opptakene på den offentlige Vercel-siden. CLI-deploy inkluderer derfor `public/audio/`, mens filene fortsatt er Git-ignorert. Dette oppdaterer den tidligere avgrensningen til lokal demo for disse fem filene; det innebærer ikke en generell lisens for andre brukere av kildekoden. Avspilling starter fortsatt bare etter brukerhandling.
+
 Verifisert 17. oktober 2026 fra den utvidede YouTube-beskrivelsen: **MitiS – Endeavors**. Videoen er «Particle tests (15) 3D Music Visualizer - Full HD», MatthiasM.de, publisert 12. februar 2013.
 
 - Video: https://www.youtube.com/watch?v=fpViZkhpPHk

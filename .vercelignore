@@ -4,7 +4,6 @@ dist/
 .coordination/
 test-results/
 references/
-public/audio/
 public/models/
 public/wasm/
 public/tracking-worker.js

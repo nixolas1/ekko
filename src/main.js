@@ -145,16 +145,16 @@ function modeUI(){
   engine.persistent=physicsMode==='persistent';engine.flowMode=({smoke:1,ring:2,spectral:3,plume:4,duet:5})[physicsMode]||0;
   document.querySelectorAll('[data-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.mode===physicsMode)));
   $('physics-mode').value=physicsMode;$('effect').hidden=physicsMode!=='sculpture';$('effect-label').hidden=physicsMode!=='sculpture';
-  $('mode-description').textContent={plume:'Tynne røykseil med fargede lyspulser fra valgt palett. Hendene samler, bøyer og skyver strømmen.',duet:'Varme oransje og isblå virvler. Foldede lysstrømmer som formes av hendene og musikken.',spectral:'Volumetrisk røyk. Bass skyter mot venstre, mellomtoner opp og diskant mot høyre. Hendene former strømmen.',smoke:'Røyken stiger og virvler. Samle den i neven, og skyv den med åpen hånd.',ring:'En ring sender røyk utover. Hendene bøyer strømmene og lager virvler.',persistent:'Samle lyset i neven. Åpne hånden og send det av gårde.',sculpture:'Musikken former lyset. Hendene trekker og skyver.',flight:'Du er en partikkel med flygedrømmer. Løft begge hender, slå dem ned og fly over hustakene — under fuglene. ↑ eller klikk flakser også.'}[physicsMode];
+  $('mode-description').textContent={plume:'Tynne røykseil med fargede lyspulser fra valgt palett. Hendene samler, bøyer og skyver strømmen.',duet:'Varme oransje og isblå virvler. Foldede lysstrømmer som formes av hendene og musikken.',spectral:'Volumetrisk røyk. Bass skyter mot venstre, mellomtoner opp og diskant mot høyre. Hendene former strømmen.',smoke:'Varm røyk stiger gjennom et simulert væskefelt. Hendene trekker, skyver og virvler røyken.',ring:'En ring sender røyk utover. Hendene bøyer strømmene og lager virvler.',persistent:'Samle lyset i neven. Åpne hånden og send det av gårde.',sculpture:'Musikken former lyset. Hendene trekker og skyver.',flight:'Du er en partikkel med flygedrømmer. Løft begge hender, slå dem ned og fly over hustakene — under fuglene. ↑ eller klikk flakser også.'}[physicsMode];
   const flying=physicsMode==='flight';$('flight-scene').hidden=!flying;$('flight-hud').hidden=!flying;
-  document.body.classList.toggle('flight-mode',flying);$('particles').disabled=flying;if(flying)flight.reset();countUI();
+  document.body.classList.toggle('flight-mode',flying);$('particles').disabled=flying||physicsMode==='smoke';if(flying)flight.reset();countUI();
 }
 function selectMode(mode){physicsMode=mode;adaptiveQuality.reset();modeUI();persist();}
 $('physics-mode').onchange=e=>{selectMode(e.target.value);e.target.blur();};
 document.querySelectorAll('[data-mode]').forEach(button=>button.onclick=()=>selectMode(button.dataset.mode));
 modeUI();
 $('effect').value=String(engine.effect);$('effect').onchange=e=>{engine.effect=Number(e.target.value);persist();};
-function countUI(){$('particles').value=autoCount?'auto':String(engine.count);$('particle-label').textContent=physicsMode==='flight'?'1 partikkel · store drømmer':`${engine.count.toLocaleString('nb-NO')} ${autoCount?'· auto':'partikler'}`;}
+function countUI(){$('particles').value=autoCount?'auto':String(engine.count);$('particle-label').textContent=physicsMode==='flight'?'1 partikkel · store drømmer':physicsMode==='smoke'?'Røyk · væskesimulering':`${engine.count.toLocaleString('nb-NO')} ${autoCount?'· auto':'partikler'}`;}
 $('particles').onchange=e=>{autoCount=e.target.value==='auto';if(!autoCount)engine.count=Number(e.target.value);adaptiveQuality.reset();countUI();persist();};countUI();
 function paletteUI(){document.querySelectorAll('[data-palette]').forEach(b=>{const active=Number(b.dataset.palette)===engine.palette;b.classList.toggle('selected',active);b.setAttribute('aria-pressed',String(active));});}
 document.querySelectorAll('[data-palette]').forEach(button=>button.onclick=()=>{engine.palette=Number(button.dataset.palette);paletteUI();persist();});paletteUI();
@@ -197,7 +197,7 @@ function frame(now){
   const audio=sound.sample(now/1000);engine.musicTransient=sound.transient;engine.emissionBands=sound.emissionBands;audio[3]=Math.max(audio[3],sound.transient*.8);
   // Hands are the only force sources in every mode. No body joints or invisible demo attractor.
   const forces=hands.map(hand=>[hand.x,hand.y,hand.strength*(hand.strength<0?pushPower:pullPower),engine.persistent?.95:.65]);
-  if(autoCount&&!paused&&physicsMode!=='flight'){const quality=adaptiveQuality.update(dt,engine.count,engine.renderScale,tracker.active&&tracker.backend==='GPU'?tracker.ms:0);if(quality){engine.count=quality.count;engine.renderScale=engine.resolution==='auto'?quality.scale:1;countUI();}}
+  if(autoCount&&!paused&&physicsMode!=='flight'&&physicsMode!=='smoke'){const quality=adaptiveQuality.update(dt,engine.count,engine.renderScale,tracker.active&&tracker.backend==='GPU'?tracker.ms:0);if(quality){engine.count=quality.count;engine.renderScale=engine.resolution==='auto'?quality.scale:1;countUI();}}
   if(physicsMode==='flight'){flight.frame(dt,hands,paused,document.body.classList.contains('immersive'));}else engine.frame(dt,audio,forces,paused);frames.push(dt*1000);if(frames.length>90)frames.shift();
   if(now-lastUI>150){
     lastUI=now;if(physicsMode==='flight'){$('flight-score').textContent=`${Math.floor(flight.distance)} m`; $('flight-message').textContent=flight.message;} $('track-time').hidden=sound.mode!=='file';

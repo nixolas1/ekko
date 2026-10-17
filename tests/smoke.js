@@ -1,3 +1,4 @@
+// Particle-ring regression. Grid smoke is checked separately in tests/fluid.html.
 import {ParticleEngine} from '../src/gpu.js';
 document.querySelector('#run').onclick=async()=>{
  const out=document.querySelector('#result'),e=new ParticleEngine(document.querySelector('canvas')),errors=[];e.onError=x=>errors.push(x);out.textContent='running';
@@ -5,12 +6,12 @@ document.querySelector('#run').onclick=async()=>{
   e.count=32768;await e.init();const n=e.count,seed=new Float32Array(n*16);
   const read=async()=>{const b=e.device.createBuffer({size:seed.byteLength,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ}),c=e.device.createCommandEncoder();c.copyBufferToBuffer(e.buffer,0,b,0,seed.byteLength);e.device.queue.submit([c.finish()]);await b.mapAsync(GPUMapMode.READ);const a=new Float32Array(b.getMappedRange().slice(0));b.unmap();b.destroy();return a;};
   const run=async(mode,forces=[])=>{e.flowMode=mode;e.frame(0,[0,0,0,0],[],false);await e.device.queue.onSubmittedWorkDone();e.time=0;e.clock=0;e.tracked=[];for(let i=0;i<n;i++){const o=i*16,a=(i%1024)/1024*Math.PI*2;seed[o]=Math.cos(a)*.45;seed[o+1]=Math.sin(a)*.45;seed[o+2]=(i%19-9)*.005;seed[o+10]=mode+1;seed[o+11]=1;seed[o+13]=1;seed[o+15]=8;}e.device.queue.writeBuffer(e.buffer,0,seed);e.frame(1/60,[0,0,0,0],forces,false);return read();};
-  const smoke=await run(1),ring=await run(2),pull=await run(1,[[0,0,16,.95]]),push=await run(1,[[0,0,-16,.95]]);
+  const smoke=await run(2),ring=await run(2),pull=await run(2,[[0,0,16,.95]]),push=await run(2,[[0,0,-16,.95]]);
   let upward=0,radial=0,attract=0,repel=0;
   for(let i=0;i<n;i++){const o=i*16,x=seed[o]/.45,y=seed[o+1]/.45;upward+=smoke[o+5];radial+=ring[o+4]*x+ring[o+5]*y;attract+=(pull[o+4]-smoke[o+4])*x+(pull[o+5]-smoke[o+5])*y;repel+=(push[o+4]-smoke[o+4])*x+(push[o+5]-smoke[o+5])*y;}
   const motion={upwardVelocity:upward/n,ringOutwardVelocity:radial/n,closedHandChange:attract/n,openHandChange:repel/n};
   const cycles=[];
-  for(const mode of [1,2]){e.flowMode=mode;for(let step=0;step<540;step++){if(step%90===0)e.explode(.1,0);e.frame(1/60,[.8,.4,.2,.7],[[Math.sin(step*.03)*.4,.1,step%120<60?16:-16,.8]],false);if(step%30===0)await e.device.queue.onSubmittedWorkDone();}const data=await read();let bad=0,born=0;for(let i=0;i<n;i++){const o=i*16;for(let j=0;j<16;j++)if(!Number.isFinite(data[o+j]))bad++;if(data[o+13]<1)born++;}e.frame(1/60,[0,0,0,0],[],true);const frozen=await read();cycles.push({mode,nonFinite:bad,recentBirths:born,pauseUnchanged:data.every((v,i)=>v===frozen[i])});}
+  for(const mode of [2]){e.flowMode=mode;for(let step=0;step<540;step++){if(step%90===0)e.explode(.1,0);e.frame(1/60,[.8,.4,.2,.7],[[Math.sin(step*.03)*.4,.1,step%120<60?16:-16,.8]],false);if(step%30===0)await e.device.queue.onSubmittedWorkDone();}const data=await read();let bad=0,born=0;for(let i=0;i<n;i++){const o=i*16;for(let j=0;j<16;j++)if(!Number.isFinite(data[o+j]))bad++;if(data[o+13]<1)born++;}e.frame(1/60,[0,0,0,0],[],true);const frozen=await read();cycles.push({mode,nonFinite:bad,recentBirths:born,pauseUnchanged:data.every((v,i)=>v===frozen[i])});}
   // Render the exact same frozen smoke twice: synthetic signal alone must stay gray,
   // while an explicitly active music source must light colored bulbs. No audio is played.
   const lightStats=async active=>{
@@ -28,6 +29,6 @@ document.querySelector('#run').onclick=async()=>{
   // The requested smaller, desaturated lamps should still pulse visibly, with only
   // a subtle hue change. Guard against returning to the old highly colored glow.
   const musicLights={lampsOff,lampsOn,pass:lampsOn.radiance>lampsOff.radiance*1.2&&lampsOn.chromaRatio>lampsOff.chromaRatio+.003&&lampsOn.chromaRatio<.3};
-  out.textContent=JSON.stringify({pass:upward>0&&radial>0&&attract<0&&repel>0&&cycles.every(c=>c.nonFinite===0&&c.recentBirths>0&&c.pauseUnchanged)&&!errors.length&&musicLights.pass,motion,cycles,musicLights,errors},null,2);
+  out.textContent=JSON.stringify({pass:radial>0&&attract<0&&repel>0&&cycles.every(c=>c.nonFinite===0&&c.recentBirths>0&&c.pauseUnchanged)&&!errors.length&&musicLights.pass,motion,cycles,musicLights,errors},null,2);
  }catch(error){out.textContent=JSON.stringify({pass:false,error:error.message,errors},null,2);}finally{e.dispose();}
 };

@@ -5,6 +5,7 @@ import postCode from './post-shader.wgsl?raw';
 import volumeCode from './volume.wgsl?raw';
 import referenceSimulation from './reference-simulation.wgsl?raw';
 import referenceRenderCode from './reference-render.wgsl?raw';
+import {FluidSmoke} from './fluid.js';
 const MAX_PARTICLES=3145728,PARTICLE_BYTES=64,MAX_FORCES=32,MAX_BURSTS=8,MAX_QUEUE=64;
 // Spectral smoke volume: grid mirrors VX/VY/VZ in volume.wgsl. At most VOLUME_SPLATS particles are splatted per
 // frame (every stride-th one, weighted up), which bounds both the atomic cost and the fixed point range.
@@ -80,6 +81,7 @@ export class ParticleEngine {
     this.renderGroup=device.createBindGroup({layout:this.render.getBindGroupLayout(0),entries});
     this.referenceRenderGroup=device.createBindGroup({layout:this.referenceRender.getBindGroupLayout(0),entries});
     await this.buildVolume(volume,post);
+    this.fluid=new FluidSmoke(this);await this.fluid.init();
     this.resize(true);
   }
   // Grid-sized resources are independent of the canvas; the raymarch targets are made in buildVolumeTargets().
@@ -223,6 +225,18 @@ export class ParticleEngine {
     const stride=Math.ceil(count/VOLUME_SPLATS);
     if (smoke) this.writeVolume(count,stride);
     const encoder=device.createCommandEncoder();
+    if (mode===2) {
+      this.fluid.allocate(this.canvas.width/this.canvas.height,modeChanged);
+      if (!paused && step>0) this.fluid.step(encoder);
+      if (redraw) {
+        this.fluid.draw(encoder,this.sceneViews[0]);this.sceneIndex=0;
+        this.screenPass(encoder,this.downPipeline,this.downGroups[0],this.glowViews[0]);
+        [1,0,1,0].forEach((to,i)=>this.screenPass(encoder,this.blurPipeline,this.blurGroups[i],this.glowViews[to]));
+        this.dirty=false;this.signature=signature;
+      }
+      this.screenPass(encoder,this.compositePipeline,this.compositeGroups[0],this.context.getCurrentTexture().createView());
+      device.queue.submit([encoder.finish()]);return;
+    }
     if (smoke&&!this.noiseReady) {
       const noise=encoder.beginComputePass();noise.setPipeline(this.buildNoise);noise.setBindGroup(0,this.noiseGroup);noise.dispatchWorkgroups(32768/64);noise.end();
       this.noiseReady=true;

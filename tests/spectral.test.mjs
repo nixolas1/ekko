@@ -144,3 +144,20 @@ test('three million coincident particles cannot overflow signed density sums',()
  assert(3145728*511<2147483647);
  assert.match(read('src/particles.wgsl'),/fract\(gridPos.x\) \* 512.0/);
 });
+
+test('smoke mode runs the fluid solver, bypasses particle work and freezes density on pause', async()=>{
+  await withEngine((engine,log)=>{
+    engine.flowMode=1;engine.count=3145728;
+    engine.frame(1/60,[0,0,0,0],[],false);
+    const order=entries(log);
+    for(const name of ['advectVelocity','curl','confine','divergence','pressure','project','dyeForward','dyeBackward','dyeCorrect','fluidFragment'])assert.ok(order.includes(name),name);
+    for(const name of ['binParticles','simulate','voxelize','referenceFragment'])assert.ok(!order.includes(name),name);
+    assert.equal(order.filter(x=>x==='pressure').length,32);
+    assert.ok(order.indexOf('project')<order.indexOf('dyeForward'));
+    const allocations=log.textures.length;
+    log.passes.length=0;engine.count=32768;engine.frame(1/60,[1,1,1,1],[[0,0,16,.5]],true);
+    assert.ok(!entries(log).includes('dyeCorrect'));
+    assert.ok(!entries(log).includes('advectVelocity'));
+    assert.equal(log.textures.length,allocations,'particle amount cannot reset fluid density');
+  });
+});

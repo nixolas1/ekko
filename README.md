@@ -32,7 +32,7 @@ Camera activation requests normal browser permission. Tracking runs locally in a
 
 ## Visual modes
 
-- **Røyk / Smoke:** buoyancy, turbulence, and fading particle sheets.
+- **Røyk / Smoke:** a 2D incompressible fluid simulation with heat-driven buoyancy, pressure projection, vorticity confinement, and sharp advected smoke density.
 - **Røykring / Smoke ring:** radial smoke emission from a ring.
 - **Spektralrøyk / Spectral smoke:** frequency-directed emission, native-resolution filaments, and a bounded volumetric lighting pass.
 - **Røyklys / Smoke light:** coloured smoke ribbons; seven frequency bands control emission and illumination.
@@ -43,7 +43,9 @@ Camera activation requests normal browser permission. Tracking runs locally in a
 
 Seven palettes, native and 4K output, and particle counts up to **3,145,728** are available where GPU buffer limits permit. Automatic quality targets 60 FPS by adjusting particle count. Manual maximum density does not guarantee 60 FPS; tracking and rendering costs depend on hardware and viewport size. Native and 4K modes retain their output resolution.
 
-Smoke uses particle advection through shared velocity fields, not a full fluid solver. Fine streaks carry detail, while restrained bloom and volumetric lighting supply depth. Hand forces act on the simulated particles.
+Smoke mode uses a staggered velocity grid with a pressure solve, following the grid-fluid approach demonstrated by [Sebastian Lague’s Smoke-Simulation](https://github.com/SebLague/Smoke-Simulation). This is an original WGSL implementation, not a copy or Unity port. A separate, higher-resolution dye field uses limited MacCormack advection to retain smoke detail. The particle-count control is disabled for this mode. Hand motion stirs the fluid; pull/push add circulation and directional forces. Other smoke modes retain their particle-based renderers.
+
+`tests/fluid.html` checks actual GPU pressure reduction, buoyancy, finite density, pause, and hand response. The velocity grid is bounded at 512×192 and the dye field at 2048×768, independently of native/4K output resolution.
 
 ## Project layout
 
@@ -56,7 +58,7 @@ Smoke uses particle advection through shared velocity fields, not a full fluid s
 
 ## Music and references
 
-The named song presets refer to **local, unbundled audio files**. A fresh clone does not contain those recordings; use the local audio-file picker or microphone. See [music notes](references/music.md) for filenames and source attribution. Audio files, reference screenshots, generated assets, test captures, and local agent logs are excluded from Git.
+The named song presets refer to audio files in `public/audio/`. The owner has confirmed permission to host the five current recordings on the deployed site. They remain excluded from Git, so a fresh clone needs its own permitted copies or the local audio-file picker / microphone. See [music notes](references/music.md) for filenames and source attribution. Reference screenshots, generated assets, test captures, and local agent logs are excluded from Git.
 
 Vite copies local `public/audio/` files into `dist/` when they exist. Include only audio you have permission to distribute when publishing a built site.
 
