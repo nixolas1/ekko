@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EKKO runtime verification harness</title>
+<style>
+  html,body{margin:0;height:100%;background:#05060d;color:#d9def5;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+  #stage,#stage canvas{position:fixed;inset:0;width:100vw;height:100vh;display:block}
+  #panel{position:fixed;top:12px;right:12px;bottom:12px;width:min(560px,calc(100vw - 24px));display:flex;flex-direction:column;gap:8px;padding:12px;box-sizing:border-box;background:rgba(8,10,20,.93);border:1px solid #2b3050;border-radius:8px}
+  h1{margin:0;font-size:14px;font-weight:600}
+  p{margin:0;color:#97a0cc}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  button{font:inherit;color:#fff;background:#2f3a8f;border:1px solid #4a57c9;border-radius:6px;padding:6px 12px;cursor:pointer}
+  button.primary{background:#3347e0;font-weight:600}
+  button:disabled{opacity:.5;cursor:progress}
+  label{display:flex;gap:4px;align-items:center;color:#97a0cc}
+  input[type=number]{width:64px;font:inherit;background:#0d1124;color:#fff;border:1px solid #2b3050;border-radius:4px;padding:2px 4px}
+  #status{min-height:1.4em;color:#87f1e6}
+  #log{max-height:96px;overflow:auto;margin:0;color:#97a0cc;white-space:pre-wrap}
+  #results{flex:1;min-height:0;margin:0;overflow:auto;padding:8px;background:#03040a;border:1px solid #1d2140;border-radius:6px;white-space:pre-wrap;word-break:break-word}
+</style>
+</head>
+<body>
+<div id="stage" aria-hidden="true"></div>
+<section id="panel" aria-label="Verification controls and results">
+  <h1>EKKO runtime verification harness</h1>
+  <p>Isolated test page: local assets only, never part of the app bundle. Worker test uses a synthetic blank frame, not a live camera. FPS is measured from requestAnimationFrame intervals, not GPU execution time. Keep this tab visible and focused while it runs.</p>
+  <div class="row">
+    <button id="run-all" class="primary" type="button">Run verification</button>
+    <button id="run-gpu" type="button">GPU only</button>
+    <button id="run-worker" type="button">Worker only</button>
+    <button id="run-failure" type="button">Failure simulations only</button>
+  </div>
+  <div class="row">
+    <label>measured frames <input id="opt-frames" type="number" min="30" max="2000" value="180"></label>
+    <label>warm-up <input id="opt-warmup" type="number" min="0" max="500" value="20"></label>
+    <label><input id="opt-stress" type="checkbox" checked> 32-force stress run at 262 144</label>
+  </div>
+  <div id="status" role="status" aria-live="polite">idle</div>
+  <pre id="log" aria-label="Progress log"></pre>
+  <pre id="results" data-state="idle" aria-label="Machine-readable results (JSON)">{"state":"idle"}</pre>
+</section>
+<script type="module" src="/tests/runtime.js"></script>
+</body>
+</html>

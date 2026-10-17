@@ -1,0 +1,16 @@
+node_modules/
+dist/
+public/wasm/
+public/models/
+public/tracking-worker.js
+test-results/
+.coordination/
+public/audio/
+references/removed-audio/
+references/*
+!references/music.md
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
