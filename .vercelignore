@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.git/
+.coordination/
+test-results/
+references/
+public/audio/
+public/models/
+public/wasm/
+public/tracking-worker.js
+.env*
+*.log
+.DS_Store
