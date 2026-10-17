@@ -47,6 +47,7 @@ export class AudioInput {
   // Source died by itself (unplugged device, decode error): fall back to demo and say why.
   _fail(message){this._op++;this._release();this._setMode('demo',message);this.error=message;}
   // Any call that supersedes an in-flight microphone()/file() makes that call clean up after itself and resolve false.
+  cancelPending(){this._op++;}
   stop(){this._op++;this._release();this.error=null;this._setMode('demo');}
   // Silence immediately and invalidate pending source loads, keeping a loaded file's playhead.
   silence(){

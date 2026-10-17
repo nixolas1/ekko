@@ -98,7 +98,7 @@ function attachAudio(){
 // Loads a library track. Explicit song selection and Play start playback; reload always loads paused.
 // Stop/demo/mic/upload bump audioRevision (and AudioInput's op), so a superseded load resolves false and stays silent.
 async function loadLibraryTrack(id,{autoplay=false,position=0}={}){
-  const revision=++audioRevision,track=trackById(resolveTrackId(id));
+  const revision=++audioRevision,track=trackById(resolveTrackId(id));sound.cancelPending();
   if(autoplay)await sound.context(); // resume inside the click gesture, before the fetch
   if(revision!==audioRevision)return false;
   const file=await loadTrackFile(track);if(revision!==audioRevision)return false;
@@ -121,6 +121,7 @@ $('track-select').onchange=async e=>{
 };
 async function toggleAudio(){
   const id=$('track-select').value;
+  if(pendingTrack){audioRevision++;sound.stop();audioSelection={...audioSelection,kind:'reference',track:pendingTrack,position:0,playing:false};pendingTrack=null;audioUI();persist();return;}
   if(transportBusy){transportToken++;audioRevision++;sound.silence();transportBusy=false;audioUI();persist();return;}
   const token=++transportToken;transportBusy=true;
   try{
@@ -138,7 +139,7 @@ const youtubeLibrary={'fpViZkhpPHk':'mitis-endeavors','lI5m0-oc9lI':'mitis-shatt
 let youtubeAbort=null;
 $('youtube-button').onclick=()=>{if(audioSelection.kind==='youtube')return;audioRevision++;sound.stop();audioSelection={...audioSelection,kind:'youtube',position:0,playing:false};$('youtube-url').value=audioSelection.youtube||'';audioUI();persist();};
 async function loadYouTube({position=0}={}){
- const revision=++audioRevision;youtubeAbort?.abort();youtubeAbort=new AbortController();const controller=youtubeAbort;
+ const revision=++audioRevision;sound.stop();youtubeAbort?.abort();youtubeAbort=new AbortController();const controller=youtubeAbort;
  const input=$('youtube-url').value;$('youtube-load').disabled=true;$('youtube-status').textContent='Preparing audio…';
  try{
   const videoId=parseYouTubeVideoId(input),known=youtubeLibrary[videoId];
@@ -162,7 +163,7 @@ $('audio-file').onchange=async e=>{
     try{await cacheMusicFile(file);}catch{if(revision===audioRevision)notice('Your file is loaded, but could not be saved for the next visit.');}
   }}catch(error){notice(error.message);}
 };
-async function playAudio(){const revision=++audioRevision;await sound.context();if(revision!==audioRevision)return;await sound.element?.play();audioUI();persist();}
+async function playAudio(){const revision=++audioRevision;sound.cancelPending();await sound.context();if(revision!==audioRevision)return;await sound.element?.play();audioUI();persist();}
 async function restoreAudio(){
   const previous={...audioSelection},revision=audioRevision;
   try{

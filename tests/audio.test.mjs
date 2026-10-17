@@ -300,3 +300,13 @@ test('Stop sound silences immediately, preserves the playhead, and cancels an in
  assert.equal(await pending,false);assert.equal(a.element,original);assert.equal(a.element.paused,true);a.stop();
  }finally{f.restore();}
 });
+
+test('cancelling a pending selection preserves the current song and never autoplays the discarded file',async()=>{
+ const f=installFakes();try{
+  const a=new AudioInput();await a.file(file('current.mp3'),{autoplay:false});const current=a.element;
+  const pending=a.file(file('slow.mp3'),{autoplay:true});await new Promise(r=>setTimeout(r,5));
+  a.cancelPending();await current.play();
+  assert.equal(await pending,false);assert.equal(a.element,current);assert.equal(current.paused,false);
+  assert.equal(f.made.elements[1].paused,true);assert(f.revoked.includes('blob:slow.mp3'));a.stop();
+ }finally{f.restore();}
+});
