@@ -209,17 +209,38 @@ function modeSettingsUI(){
  $('mode-visibility-control').hidden=!['persistent','sculpture'].includes(physicsMode);
 }
 for(const key of ['speed','glow','turbulence','emission','visibility'])$('mode-'+key).oninput=e=>{modeSettings[physicsMode][key]=Number(e.target.value);modeSettingsUI();engine.dirty=true;persist();};
-let pointerIdleTimer;
+const settingsPanel=document.querySelector('.panel');
+let pointerIdleTimer,settingsPeekTimer;
+function setSettingsPeek(open){
+ clearTimeout(settingsPeekTimer);settingsPeekTimer=null;
+ open=open&&document.body.classList.contains('immersive');
+ document.body.classList.toggle('settings-peek',open);
+ settingsPanel.inert=document.body.classList.contains('immersive')&&!open;
+ if(settingsPanel.inert&&settingsPanel.contains(document.activeElement))document.activeElement.blur();
+ if(open)engine.mouse=[0,0,.18,0];
+}
+function updateSettingsPeek(e){
+ if(!document.body.classList.contains('immersive'))return;
+ if(e.clientX>=innerWidth-20){setSettingsPeek(true);return;}
+ if(!document.body.classList.contains('settings-peek'))return;
+ // Use the final panel bounds, not its animated position, so the pointer can
+ // travel directly from the edge into controls while the drawer is sliding in.
+ if(e.clientX>=innerWidth-settingsPanel.offsetWidth-36||e.buttons){clearTimeout(settingsPeekTimer);settingsPeekTimer=null;return;}
+ if(!settingsPeekTimer)settingsPeekTimer=setTimeout(()=>{setSettingsPeek(false);settingsPeekTimer=null;},240);
+}
 function updatePointer(e){
  clearTimeout(pointerIdleTimer);
  document.body.classList.remove('pointer-idle');
- const active=!e.target.closest('button,input,select,textarea,a,.panel,header,footer,video');
+ updateSettingsPeek(e);
+ const overSettings=document.body.classList.contains('settings-peek')&&e.clientX>=innerWidth-settingsPanel.offsetWidth-36;
+ const active=!overSettings&&!e.target.closest('button,input,select,textarea,a,.panel,header,footer,video');
  engine.mouse=[(2*e.clientX/innerWidth-1)*(innerWidth/innerHeight),1-2*e.clientY/innerHeight,.18,active?1:0];
- const dot=$('mouse-dot');dot.style.left=`${e.clientX}px`;dot.style.top=`${e.clientY}px`;dot.hidden=e.pointerType==='touch';
+ const dot=$('mouse-dot');dot.style.left=`${e.clientX}px`;dot.style.top=`${e.clientY}px`;dot.hidden=e.pointerType==='touch'||overSettings;
  pointerIdleTimer=setTimeout(clearPointer,5000);
 }
 addEventListener('pointermove',updatePointer);
 addEventListener('pointerdown',updatePointer);
+addEventListener('pointerup',updateSettingsPeek);
 function clearPointer(){clearTimeout(pointerIdleTimer);engine.mouse=[0,0,.18,0];$('mouse-dot').hidden=true;document.body.classList.add('pointer-idle');}
 pointerIdleTimer=setTimeout(clearPointer,5000);
 document.addEventListener('pointerleave',clearPointer);
@@ -235,7 +256,7 @@ document.querySelectorAll('[data-palette]').forEach(button=>button.onclick=()=>{
 function pauseUI(){$('pause').textContent=paused?'Resume scene':'Freeze scene';$('pause').setAttribute('aria-label',paused?'Resume scene':'Freeze scene');}
 $('pause').onclick=()=>{paused=!paused;pauseUI();persist();};pauseUI();
 $('burst').onclick=()=>{if(paused){paused=false;pauseUI();}engine.explode();persist();};
-function setImmersive(active){document.body.classList.toggle('immersive',active);engine.fill=active?1:0;persist();}
+function setImmersive(active){document.body.classList.toggle('immersive',active);setSettingsPeek(false);engine.fill=active?1:0;persist();}
 async function toggleFullscreen(){
   if(document.fullscreenElement||document.body.classList.contains('immersive')){if(document.fullscreenElement)await document.exitFullscreen();setImmersive(false);}
   else {setImmersive(true);try{await document.documentElement.requestFullscreen();}catch{setImmersive(false);notice('Fullscreen was blocked. Press H to hide the controls.');}}
@@ -258,7 +279,7 @@ addEventListener('keydown',e=>{
 });
 let resizePending=false;addEventListener('resize',()=>{resizePending=true;});
 const saveTimer=setInterval(persist,1000);
-function teardown(){youtubeAbort?.abort();persist();writeURL.flush();shuttingDown=true;clearInterval(saveTimer);clearTimeout(noticeTimer);cancelAnimationFrame(raf);tracker.stop();sound.stop();sound.ctx?.close();engine.dispose();}
+function teardown(){youtubeAbort?.abort();persist();writeURL.flush();shuttingDown=true;clearInterval(saveTimer);clearTimeout(noticeTimer);clearTimeout(pointerIdleTimer);clearTimeout(settingsPeekTimer);cancelAnimationFrame(raf);tracker.stop();sound.stop();sound.ctx?.close();engine.dispose();}
 addEventListener('pagehide',teardown,{once:true});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)persist();});
 let last=0,lastUI=0,frames=[],raf=0;
