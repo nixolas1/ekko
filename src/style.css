@@ -12,3 +12,4 @@ body.immersive{overflow:hidden;cursor:none}body.immersive header,body.immersive 
 /* Keep the interaction point visible when the system cursor and controls are hidden. */
 #mouse-dot{display:none;position:fixed;left:0;top:0;width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.55);border:1px solid rgba(255,255,255,.35);transform:translate(-50%,-50%);pointer-events:none;z-index:20}
 body.immersive #mouse-dot{display:block}
+body.pointer-idle,body.pointer-idle *{cursor:none!important}

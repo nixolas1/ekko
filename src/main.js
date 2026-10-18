@@ -209,12 +209,19 @@ function modeSettingsUI(){
  $('mode-visibility-control').hidden=!['persistent','sculpture'].includes(physicsMode);
 }
 for(const key of ['speed','glow','turbulence','emission','visibility'])$('mode-'+key).oninput=e=>{modeSettings[physicsMode][key]=Number(e.target.value);modeSettingsUI();engine.dirty=true;persist();};
-addEventListener('pointermove',e=>{
+let pointerIdleTimer;
+function updatePointer(e){
+ clearTimeout(pointerIdleTimer);
+ document.body.classList.remove('pointer-idle');
  const active=!e.target.closest('button,input,select,textarea,a,.panel,header,footer,video');
  engine.mouse=[(2*e.clientX/innerWidth-1)*(innerWidth/innerHeight),1-2*e.clientY/innerHeight,.18,active?1:0];
  const dot=$('mouse-dot');dot.style.left=`${e.clientX}px`;dot.style.top=`${e.clientY}px`;dot.hidden=e.pointerType==='touch';
-});
-function clearPointer(){engine.mouse=[0,0,.18,0];$('mouse-dot').hidden=true;}
+ pointerIdleTimer=setTimeout(clearPointer,5000);
+}
+addEventListener('pointermove',updatePointer);
+addEventListener('pointerdown',updatePointer);
+function clearPointer(){clearTimeout(pointerIdleTimer);engine.mouse=[0,0,.18,0];$('mouse-dot').hidden=true;document.body.classList.add('pointer-idle');}
+pointerIdleTimer=setTimeout(clearPointer,5000);
 document.addEventListener('pointerleave',clearPointer);
 addEventListener('blur',clearPointer);
 function selectMode(mode){physicsMode=mode;adaptiveQuality.reset();modeUI();persist();}
