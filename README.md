@@ -17,13 +17,15 @@ npm test
 npm run build
 ```
 
-The production output is in `dist/`. Browser GPU checks are available under `tests/`, including `reference.html`, `spectral.html`, `emission.html`, and `forces.html` when running the development server.
+The production output is in `dist/`. After building, run `npm run preview -- --port 5174` and `node tests/demo-controls.browser.mjs` to verify the demo overlay, mouse controls, and keyboard shortcuts in Chrome with synthetic camera landmarks. Browser GPU checks are available under `tests/`, including `reference.html`, `spectral.html`, `emission.html`, and `forces.html` when running the development server.
 
 ## Controls
 
+- **Show hands** in Movement adds a live skeleton and gesture overlay for demos, including fullscreen. The choice is saved and shareable in the URL; the checkbox does not start or stop the camera.
+- One finger: Wand. Two fingers: Vortex (spread to widen). Three fingers: Shockwave. Hold briefly to switch; thumbs are ignored.
 - Closed hand: pull particles into orbit. Open hand: push them away. Opening a closed hand also triggers a burst.
-- One Hand force slider sets pull and push together, with fine low-end control up to 3×. Move the mouse over the scene to repel smoke and particles within a soft radius; it never attracts.
-- **Space** (or **M**): play or pause music. **B**: burst.
+- One Hand force slider sets pull and push together, with fine low-end control up to 3×. Move the mouse over the scene for soft repulsion. Click and hold to push like an open hand; Command-click and hold to gather like a fist.
+- **Space**: play or pause music. **N**: next mode (wraps around). **B**: burst.
 - **Enter**, **F**, or double-click the background: toggle fullscreen and hide controls.
 - **H**: show or hide controls. **Escape**: restore controls.
 - Choose a local audio file or microphone input. Music never starts automatically after reload; settings and playback position are remembered.
@@ -91,7 +93,7 @@ Vite alone does not run the Python API: use `vercel dev` for the complete app, o
 
 Choose **Tab audio → Share tab** in Music, select the tab playing your video, and enable **Share tab audio** in the browser picker. Desktop Chrome or Edge is recommended; browsers or selected surfaces without an audio track show a clear error. Keep playing/pausing the video in its original tab. EKKO feeds the captured audio into the same analyser as library music, including all frequency-driven smoke, bass impulses and note lighting. No download, transcoding, microphone, recording or upload is needed.
 
-**Stop sharing** (or Space/M while Tab audio is selected) disconnects EKKO; it does not pause the original video. Browser capture requires a display track, which EKKO requests at low resolution and one frame per second, and never renders or transmits. Switching audio sources or leaving the page releases all capture tracks. Refresh and shared links can remember `source=tab`, but never start capture or open a picker automatically.
+**Stop sharing** (or Space while Tab audio is selected) disconnects EKKO; it does not pause the original video. Browser capture requires a display track, which EKKO requests at low resolution and one frame per second, and never renders or transmits. Switching audio sources or leaving the page releases all capture tracks. Refresh and shared links can remember `source=tab`, but never start capture or open a picker automatically.
 
 Particle ring accelerates with measured bass intensity. Fluid smoke uses stronger upward bass-onset jets on the left, with higher-frequency emitters continuing to the right. Spectral smoke distributes nine frequency sectors around the full circle, with dim smoke between notes.
 

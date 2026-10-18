@@ -11,6 +11,7 @@ export function normalizeSettings(value={}){
     resolution:['native','4k','auto'].includes(s.resolution)?s.resolution:'native',
     pullPower:Math.max(0,Math.min(3,force)),
     pushPower:Math.max(0,Math.min(3,force)),
+    showHands:s.showHands===true,
     maxHands:[2,4,8].includes(s.maxHands)?s.maxHands:2,
     palette:[0,1,2,3,4,5,6].includes(s.palette)?s.palette:0,
     effect:[0,1,2,3].includes(s.effect)?s.effect:0,

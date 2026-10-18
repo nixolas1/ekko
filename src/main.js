@@ -3,6 +3,8 @@ import { ParticleEngine } from './gpu';
 import { AudioInput } from './audio';
 import { Tracking } from './tracking';
 import { HandForces } from './interactions';
+import { HandOverlay } from './hand-overlay';
+import { mouseHandForce } from './mouse-hand';
 import {forceFromSlider,sliderFromForce} from './force-controls';
 import { AdaptiveQuality } from './performance';
 import { loadSettings, saveSettings, cacheMusicFile, loadMusicFile } from './preferences';
@@ -16,6 +18,9 @@ const engine=new ParticleEngine($('scene')), sound=new AudioInput(), handForces=
 Object.assign(engine,{count:settings.count,palette:settings.palette,effect:settings.effect,persistent:settings.persistent,resolution:settings.resolution});
 sound.gain=settings.gain;
 let physicsMode=settings.physicsMode;
+let showHands=settings.showHands;
+const handOverlay=new HandOverlay($('hand-demo'));handOverlay.setEnabled(showHands);
+const mouseHand={x:0,y:0,active:false,held:false,metaKey:false};
 const modeSettings=settings.modeSettings;
 // Playback and scene pause are session-only; links never restore a frozen scene.
 let paused=matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -29,7 +34,7 @@ engine.onError=gpuError;
 function persist(){
   if(restoring||shuttingDown)return;
   if(sound.mode==='file'&&sound.element)audioSelection={...audioSelection,position:sound.element.currentTime,playing:!sound.element.paused};
-  const current={resolution:engine.resolution,pullPower,pushPower,count:autoCount?settings.count:engine.count,autoCount,maxHands:tracker.options.maxHands,palette:engine.palette,effect:engine.effect,persistent:engine.persistent,physicsMode,modeSettings,gain:sound.gain,paused,immersive:document.body.classList.contains('immersive'),audio:{...audioSelection,track:audioSelection.kind==='reference'?audioSelection.track:$('track-select').value||audioSelection.track}};
+  const current={resolution:engine.resolution,pullPower,pushPower,count:autoCount?settings.count:engine.count,autoCount,showHands,maxHands:tracker.options.maxHands,palette:engine.palette,effect:engine.effect,persistent:engine.persistent,physicsMode,modeSettings,gain:sound.gain,paused,immersive:document.body.classList.contains('immersive'),audio:{...audioSelection,track:audioSelection.kind==='reference'?audioSelection.track:$('track-select').value||audioSelection.track}};
   if(pendingTrack)current.audio={...current.audio,kind:'reference',track:pendingTrack,position:0};
   saveSettings(current);writeURL(current);
 }
@@ -42,6 +47,7 @@ const tracker=new Tracking($('camera'),data=>{
   $('camera-count').textContent=`${data.hands.length} hands`;
   for(const point of data.bursts){const [x,y]=mapPoint(point);engine.explode(x,y);}
   for(const point of handForces.drainBursts())engine.explode(point.x,point.y,point.strength*pushPower);
+  handOverlay.update(data,handForces.states,trackingTime);
   drawSkeleton(data);
 },status=>{ $('tracking-status').textContent=status;if(status.startsWith('Tracking stopped')){resetCamera();notice(status);} },{maxHands:settings.maxHands});
 function drawSkeleton(data){
@@ -59,7 +65,7 @@ function drawSkeleton(data){
     ctx.fillText(gestureLabels[state?.stable]||(state?(state.mode>0?'Gather':'Push'):'Tracking'),Math.max(45,Math.min(canvas.width-45,x)),Math.max(20,Math.min(canvas.height-8,y+25)));
   });
 }
-function resetCamera(){trackingData=null;handForces.clear();$('camera-button').innerHTML='Enable camera';$('camera-placeholder').hidden=false;$('camera-count').textContent=`Up to ${tracker.options.maxHands} hands`;$('tracking-hz').textContent='—';$('skeleton').getContext('2d').clearRect(0,0,$('skeleton').width,$('skeleton').height);}
+function resetCamera(){trackingData=null;handForces.clear();handOverlay.clear();$('camera-button').innerHTML='Enable camera';$('camera-placeholder').hidden=false;$('camera-count').textContent=`Up to ${tracker.options.maxHands} hands`;$('tracking-hz').textContent='—';$('skeleton').getContext('2d').clearRect(0,0,$('skeleton').width,$('skeleton').height);}
 async function toggleCamera(){
   if(tracker.active){tracker.stop();resetCamera();$('tracking-status').textContent='Camera off';return;}
   if(cameraStarting)return;cameraStarting=true;$('camera-button').disabled=true;$('tracking-status').textContent='Waiting for camera…';
@@ -68,6 +74,8 @@ async function toggleCamera(){
   finally{cameraStarting=false;$('camera-button').disabled=false;}
 }
 $('camera-button').onclick=toggleCamera;
+$('show-hands').checked=showHands;
+$('show-hands').onchange=e=>{showHands=e.target.checked;handOverlay.setEnabled(showHands);persist();};
 $('copy-link').onclick=async()=>{persist();writeURL.flush();try{await navigator.clipboard.writeText(location.href);notice('Link copied: mode, song, position and settings. Music opens paused.');}catch{notice('Copy the address bar to share these settings.');}};
 function forceUI(){
   $('force-power').value=String(sliderFromForce(pullPower));
@@ -224,7 +232,7 @@ function setSettingsPeek(open){
  document.body.classList.toggle('settings-peek',open);
  settingsPanel.inert=document.body.classList.contains('immersive')&&!open;
  if(settingsPanel.inert&&settingsPanel.contains(document.activeElement))document.activeElement.blur();
- if(open)engine.mouse=[0,0,.18,0];
+ if(open){engine.mouse=[0,0,.18,0];mouseHand.active=false;mouseHand.held=false;}
 }
 function updateSettingsPeek(e){
  if(!document.body.classList.contains('immersive'))return;
@@ -241,14 +249,23 @@ function updatePointer(e){
  updateSettingsPeek(e);
  const overSettings=document.body.classList.contains('settings-peek')&&e.clientX>=innerWidth-settingsPanel.offsetWidth-36;
  const active=!overSettings&&!e.target.closest('button,input,select,textarea,a,.panel,header,footer,video');
- engine.mouse=[(2*e.clientX/innerWidth-1)*(innerWidth/innerHeight),1-2*e.clientY/innerHeight,.18,active?1:0];
+ mouseHand.x=(2*e.clientX/innerWidth-1)*(innerWidth/innerHeight);mouseHand.y=1-2*e.clientY/innerHeight;
+ mouseHand.active=active;mouseHand.metaKey=e.metaKey;
+ if(!active||!(e.buttons&1))mouseHand.held=false;
+ if(e.type==='pointerdown'&&e.button===0&&active){
+  mouseHand.held=true;
+  if(!e.metaKey&&pushPower>0)engine.explode(mouseHand.x,mouseHand.y,pushPower);
+ }
+ engine.mouse=[mouseHand.x,mouseHand.y,.18,active&&!mouseHand.held?1:0];
  const dot=$('mouse-dot');dot.style.left=`${e.clientX}px`;dot.style.top=`${e.clientY}px`;dot.hidden=e.pointerType==='touch'||overSettings;
  pointerIdleTimer=setTimeout(clearPointer,5000);
 }
 addEventListener('pointermove',updatePointer);
 addEventListener('pointerdown',updatePointer);
-addEventListener('pointerup',updateSettingsPeek);
-function clearPointer(){clearTimeout(pointerIdleTimer);engine.mouse=[0,0,.18,0];$('mouse-dot').hidden=true;document.body.classList.add('pointer-idle');}
+addEventListener('pointerup',updatePointer);
+addEventListener('pointercancel',clearPointer);
+addEventListener('keyup',e=>{if(e.key==='Meta')mouseHand.metaKey=false;});
+function clearPointer(){clearTimeout(pointerIdleTimer);mouseHand.active=false;mouseHand.held=false;mouseHand.metaKey=false;engine.mouse=[0,0,.18,0];$('mouse-dot').hidden=true;document.body.classList.add('pointer-idle');}
 pointerIdleTimer=setTimeout(clearPointer,5000);
 document.addEventListener('pointerleave',clearPointer);
 addEventListener('blur',clearPointer);
@@ -269,6 +286,7 @@ async function toggleFullscreen(){
   else {setImmersive(true);try{await document.documentElement.requestFullscreen();}catch{setImmersive(false);notice('Fullscreen was blocked. Press H to hide the controls.');}}
 }
 addEventListener('dblclick',event=>{
+  if(event.metaKey||event.ctrlKey||event.altKey||event.shiftKey||event.button!==0)return;
   if(event.target.closest('button,input,select,textarea,a,.panel,video'))return;
   event.preventDefault();void toggleFullscreen();
 });
@@ -276,10 +294,12 @@ $('immersive').onclick=toggleFullscreen;
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement)setImmersive(false);});
 setImmersive(settings.immersive);
 addEventListener('keydown',e=>{
+  if(e.key==='Meta')mouseHand.metaKey=true;
   const action=shortcutAction(e,document.activeElement);if(!action)return;
   e.preventDefault();
   if(action==='music')void toggleAudio();
   if(action==='fullscreen')void toggleFullscreen();
+  if(action==='next-mode'){const modes=[...document.querySelectorAll('[data-mode]')].map(b=>b.dataset.mode);selectMode(modes[(modes.indexOf(physicsMode)+1)%modes.length]);}
   if(action==='burst')$('burst').click();
   if(action==='hide')setImmersive(!document.body.classList.contains('immersive'));
   if(action==='escape')setImmersive(false);
@@ -291,7 +311,7 @@ addEventListener('pagehide',teardown,{once:true});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)persist();});
 let last=0,lastUI=0,frames=[],raf=0;
 function frame(now){
-  raf=requestAnimationFrame(frame);if(!ready||document.hidden){last=now;return;}if(resizePending){engine.resize();resizePending=false;}
+  raf=requestAnimationFrame(frame);handOverlay.render(now,tracker.active);if(!ready||document.hidden){last=now;return;}if(resizePending){engine.resize();resizePending=false;}
   const dt=last?(now-last)/1000:1/60;last=now;
   const hands=tracker.active?handForces.sample(now):[];
   handMarkers.forEach((node,index)=>{const hand=hands[index];node.hidden=!hand;if(hand){node.style.left=`${(hand.x/(innerWidth/innerHeight)+1)*50}%`;node.style.top=`${(1-hand.y)*50}%`;node.classList.toggle('repel',hand.mode<0);node.firstChild.textContent=hand.mode<0?'Push':'Pull';}});
@@ -303,6 +323,7 @@ function frame(now){
     const radius=(engine.persistent?.95:.65)*Math.max(0,1-wand-vortex-shock)+.22*wand+(hand.vortexRadius||.35)*vortex+shock;
     return [hand.x,hand.y,hand.strength*(hand.strength<0?pushPower:pullPower),radius,wand,vortex,hand.id,hand.vx,hand.vy];
   });
+  const mouseForce=mouseHandForce(mouseHand,engine.persistent,pullPower,pushPower);if(mouseForce)forces.push(mouseForce);
   if(autoCount&&!paused&&!['smoke','fluid-ring'].includes(physicsMode)){const quality=adaptiveQuality.update(dt,engine.count,engine.renderScale,tracker.active&&tracker.backend==='GPU'?tracker.ms:0);if(quality){engine.count=quality.count;engine.renderScale=engine.resolution==='auto'?quality.scale:1;countUI();}}
   engine.frame(dt,audio,forces,paused);frames.push(dt*1000);if(frames.length>90)frames.shift();
   if(now-lastUI>150){

@@ -42,3 +42,11 @@ test('particle visibility is independent per mode, bounded and linkable',()=>{
  assert.equal(next.modeSettings.sculpture.visibility,3);assert.equal(next.modeSettings.persistent.visibility,2.5);
  assert.equal(settingsFromURL('https://example.test/?visibility=100',saved).modeSettings.persistent.visibility,2.5);
 });
+
+test('hand overlay is opt-in, saved in links, and keeps music paused',()=>{
+ assert.equal(normalizeSettings().showHands,false);
+ const on=settingsFromURL('https://example.test/?showHands=1');assert.equal(on.showHands,true);assert.equal(on.audio.playing,false);
+ assert.equal(settingsFromURL(settingsURL('https://example.test/',on)).showHands,true);
+ assert.equal(settingsFromURL('https://example.test/?showHands=0',on).showHands,false);
+ assert.equal(settingsFromURL('https://example.test/?showHands=invalid',on).showHands,true);
+});
