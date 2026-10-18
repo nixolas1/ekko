@@ -2,7 +2,7 @@ import {normalizeSettings,MODE_TUNING} from './preferences.js';
 import {LOCAL_TRACKS} from './music.js';
 // Only explicit, valid link values override device preferences. No playback or
 // camera permission can be requested by a URL. Unknown query keys are preserved.
-const fields={showHands:['showHands','boolean'],mode:['physicsMode','string'],count:['count','number'],auto:['autoCount','boolean'],resolution:['resolution','string'],force:['pullPower','number'],pointSize:['pointSize','number'],hands:['maxHands','number'],palette:['palette','number'],effect:['effect','number'],persistent:['persistent','boolean'],gain:['gain','number'],immersive:['immersive','boolean']};
+const fields={optimizeDenseGlow:['optimizeDenseGlow','boolean'],showHands:['showHands','boolean'],mode:['physicsMode','string'],count:['count','number'],auto:['autoCount','boolean'],resolution:['resolution','string'],force:['pullPower','number'],pointSize:['pointSize','number'],hands:['maxHands','number'],palette:['palette','number'],effect:['effect','number'],persistent:['persistent','boolean'],gain:['gain','number'],immersive:['immersive','boolean']};
 export function settingsFromURL(href,saved={}){
   const base=normalizeSettings(saved),out={...base,audio:{...base.audio}},q=new URL(href).searchParams;
   if(!q.has('force')){const legacy=q.get('pull')??q.get('push');if(legacy!==null)q.set('force',legacy);}

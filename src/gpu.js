@@ -22,7 +22,7 @@ export class ParticleEngine {
     this.effect=0; // 0 orbital, 1 ribbons, 2 wave, 3 angular paths, 4 accretion disk
     this.persistent=false; this.flowMode=0; this.lastMode=0; this.lastEffect=0; this.musicActive=false;
     this.fill=0; // 0 centred between intro and panel, 1 fills the scene (exhibition mode)
-    this.exposure=.8; this.bloom=.06; this.trail=.035; this.renderScale=1; this.resolution='native';
+    this.exposure=.8; this.bloom=.06; this.trail=.035; this.renderScale=1; this.optimizeDenseGlow=true; this.resolution='native';
     this.pending=[]; this.serial=0; this.served=0; this.tracked=[]; this.clock=0; this.lastCount=0; this.signature='';
     // Spectral smoke look; tuned by eye, not measured against a reference.
     this.smokeDensity=1; this.smokeLight=1; this.smokeDetail=.45; this.smokeStreaks=1.0;
@@ -61,7 +61,7 @@ export class ParticleEngine {
     const device=this.device;
     this.uniform=device.createBuffer({size:UNIFORM_FLOATS*4,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
     this.buffer=device.createBuffer({size:this.capacity*PARTICLE_BYTES,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST|GPUBufferUsage.COPY_SRC});
-    this.density=device.createBuffer({size:128*128*16,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
+    this.density=device.createBuffer({size:128*128*16*17,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
     this.sampler=device.createSampler({magFilter:'linear',minFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
     this.blurDirs=[[1,0],[0,1],[2.4,0],[0,2.4]].map(dir=>{const buffer=device.createBuffer({size:16,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});device.queue.writeBuffer(buffer,0,new Float32Array([...dir,0,0]));return buffer;});
     const [compute,render,post,volume,referenceRender]=await Promise.all([this.module('particle simulation',computeCode+'\n'+referenceSimulation+'\n'+accretionCode),this.module('render.wgsl',renderCode),this.module('post-shader.wgsl',postCode),this.module('volume.wgsl',volumeCode),this.module('reference-render.wgsl',referenceRenderCode)]);
@@ -76,12 +76,16 @@ export class ParticleEngine {
       device.createRenderPipelineAsync(screen('compositeFragment',format)),
     ]);
     this.referenceRender=await device.createRenderPipelineAsync({layout:'auto',vertex:{module:referenceRender,entryPoint:'referenceVertex'},fragment:{module:referenceRender,entryPoint:'referenceFragment',targets:[{format:SCENE_FORMAT,blend:additive}]},primitive:{topology:'triangle-strip'}});
+    this.spectralRender=await device.createRenderPipelineAsync({layout:'auto',vertex:{module:referenceRender,entryPoint:'spectralVertex'},fragment:{module:referenceRender,entryPoint:'referenceFragment',targets:[{format:SCENE_FORMAT,blend:additive}]},primitive:{topology:'triangle-strip'}});
     const entries=[{binding:0,resource:{buffer:this.buffer}},{binding:1,resource:{buffer:this.uniform}}];
     this.computeGroup=device.createBindGroup({layout:this.compute.getBindGroupLayout(0),entries:[...entries,{binding:2,resource:{buffer:this.density}}]});
     this.bin=await device.createComputePipelineAsync({layout:'auto',compute:{module:compute,entryPoint:'binParticles'}});
     this.binGroup=device.createBindGroup({layout:this.bin.getBindGroupLayout(0),entries:[...entries,{binding:2,resource:{buffer:this.density}}]});
+    this.reduceDensity=await device.createComputePipelineAsync({layout:'auto',compute:{module:compute,entryPoint:'reduceDensity'}});
+    this.reduceDensityGroup=device.createBindGroup({layout:this.reduceDensity.getBindGroupLayout(0),entries:[{binding:2,resource:{buffer:this.density}}]});
     this.renderGroup=device.createBindGroup({layout:this.render.getBindGroupLayout(0),entries});
     this.referenceRenderGroup=device.createBindGroup({layout:this.referenceRender.getBindGroupLayout(0),entries});
+    this.spectralRenderGroup=device.createBindGroup({layout:this.spectralRender.getBindGroupLayout(0),entries:[...entries,{binding:2,resource:{buffer:this.density}}]});
     await this.buildVolume(volume,post);
     this.fluid=new FluidSmoke(this);await this.fluid.init();
     this.resize(true);
@@ -236,13 +240,14 @@ export class ParticleEngine {
     if (drained.length) this.served=drained[drained.length-1].serial;
     const mode=this.flowMode===1?2:this.flowMode===2?3:this.flowMode===3?SPECTRAL_MODE:this.flowMode===4?5:this.flowMode===5?6:this.flowMode===6?7:this.flowMode===7?8:this.flowMode===8?9:this.persistent?1:0;
     const smoke=mode===SPECTRAL_MODE;
+    const sampledGlow=smoke&&this.optimizeDenseGlow;
     const blackHole=mode===0&&effect===4;
     if (smoke&&!this.volumeGroups) this.buildVolumeTargets();
     const modeChanged=mode!==this.lastMode||(mode===0&&effect!==this.lastEffect&&(effect===4||this.lastEffect===4));
     this.lastEffect=effect;
     if(modeChanged){this.lastCount=0;this.lastMode=mode;this.dirty=true;}
     const needInit=count>this.lastCount;
-    const signature=`${count}|${this.palette}|${effect}`;
+    const signature=`${count}|${this.palette}|${effect}|${sampledGlow}`;
     const redraw=!paused||this.dirty||signature!==this.signature;
     const fresh=this.dirty||paused||signature!==this.signature;
     d.fill(0);
@@ -303,6 +308,7 @@ export class ParticleEngine {
       if(!blackHole){
         encoder.clearBuffer(this.density);
         const bin=encoder.beginComputePass();bin.setPipeline(this.bin);bin.setBindGroup(0,this.binGroup);bin.dispatchWorkgroups(Math.ceil(count/256));bin.end();
+        const reduce=encoder.beginComputePass();reduce.setPipeline(this.reduceDensity);reduce.setBindGroup(0,this.reduceDensityGroup);reduce.dispatchWorkgroups(128*128/256);reduce.end();
       }
       const sim=encoder.beginComputePass();sim.setPipeline(this.compute);sim.setBindGroup(0,this.computeGroup);sim.dispatchWorkgroups(Math.ceil(count/256));sim.end();
       // The volume follows the positions drawn this frame; paused frames reuse the last lit grid.
@@ -316,7 +322,7 @@ export class ParticleEngine {
       const previous=this.sceneIndex,current=1-previous;
       const pass=encoder.beginRenderPass({colorAttachments:[{view:this.sceneViews[current],clearValue:{r:0,g:0,b:0,a:0},loadOp:'clear',storeOp:'store'}]});
       pass.setPipeline(this.fadePipeline);pass.setBindGroup(0,this.fadeGroups[previous]);pass.draw(3);
-      pass.setPipeline(mode>=4?this.referenceRender:this.render);pass.setBindGroup(0,mode>=4?this.referenceRenderGroup:this.renderGroup);pass.draw(4,blackHole?count*3:count);pass.end();
+      pass.setPipeline(sampledGlow?this.spectralRender:mode>=4?this.referenceRender:this.render);pass.setBindGroup(0,sampledGlow?this.spectralRenderGroup:mode>=4?this.referenceRenderGroup:this.renderGroup);pass.draw(4,blackHole?count*3:count);pass.end();
       this.sceneIndex=current;this.dirty=false;this.signature=signature;
       this.screenPass(encoder,this.downPipeline,this.downGroups[current],this.glowViews[0]);
       [1,0,1,0].forEach((to,i)=>this.screenPass(encoder,this.blurPipeline,this.blurGroups[i],this.glowViews[to]));

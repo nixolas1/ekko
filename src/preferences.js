@@ -9,6 +9,7 @@ export function normalizeSettings(value={}){
   return {
     count:counts.includes(s.count)?s.count:524288,
     autoCount:s.autoCount!==false,
+    optimizeDenseGlow:s.optimizeDenseGlow!==false,
     resolution:['native','4k','auto'].includes(s.resolution)?s.resolution:'native',
     pullPower:Math.max(0,Math.min(3,force)),
     pushPower:Math.max(0,Math.min(3,force)),

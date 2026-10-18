@@ -1,6 +1,6 @@
 // Particle simulation, assembled with common-shader.wgsl before this file and
 // reference-simulation.wgsl after it. gpu.js schedules: clear density buffer ->
-// binParticles -> simulate -> render. These separate compute passes ensure all
+// binParticles -> reduceDensity -> simulate -> render. These separate compute passes ensure all
 // density deposits are finished before any simulation invocation reads them.
 // A workgroup barrier alone cannot synchronise all groups in a whole dispatch.
 //
@@ -13,11 +13,13 @@
 @group(0) @binding(0) var<storage, read_write> particles: array<Particle>;
 @group(0) @binding(1) var<uniform> params: Parameters;
 // Only mass is used, but the record stride is 16 bytes to match gpu.js allocation.
-// Atomics prevent simultaneous deposits from losing updates. Dense piles can
-// still contend on the same nodes; atomics make them correct, not free.
+// The first grid is the completed field; 16 scratch grids spread simultaneous
+// deposits across independent counters, including when a pinch stacks the pool.
+// Reduction preserves exact integer mass and keeps simulation reads unchanged.
 struct DensityCell { mass: atomic<u32>, unused: array<u32, 3> }
 @group(0) @binding(2) var<storage, read_write> density: array<DensityCell>;
 const GRID = 128u;
+const DENSITY_SHARDS = 16u;
 // Each particle's unit mass is split bilinearly over its four nearest nodes in exact 1/1024ths, so a
 // node holds at most 3,145,728 × 1024 < 2³² even if the whole pool coincides.
 const NODE_MASS = 1024.0;
@@ -51,11 +53,22 @@ fn binParticles(@builtin(global_invocation_id) gid: vec3u) {
   let g = densityCoordinate(p.position.xy);
   let base = densityBase(g);
   let f = densityFraction(g, base);
-  let index = base.y * GRID + base.x;
+  let index = (1u + (id % DENSITY_SHARDS)) * GRID * GRID + base.y * GRID + base.x;
   atomicAdd(&density[index].mass, (32u - f.x) * (32u - f.y));
   atomicAdd(&density[index + 1u].mass, f.x * (32u - f.y));
   atomicAdd(&density[index + GRID].mass, (32u - f.x) * f.y);
   atomicAdd(&density[index + GRID + 1u].mass, f.x * f.y);
+}
+// A separate dispatch is the global barrier between deposits and field reads.
+@compute @workgroup_size(256)
+fn reduceDensity(@builtin(global_invocation_id) gid: vec3u) {
+  let node = gid.x;
+  if (node >= GRID * GRID) { return; }
+  var mass = 0u;
+  for (var shard = 1u; shard <= DENSITY_SHARDS; shard++) {
+    mass += atomicLoad(&density[shard * GRID * GRID + node].mass);
+  }
+  atomicStore(&density[node].mass, mass);
 }
 fn densityPressure(node: vec2i, scale: f32) -> f32 {
   let c = clamp(node, vec2i(0), vec2i(i32(GRID) - 1));

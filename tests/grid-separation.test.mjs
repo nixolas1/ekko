@@ -30,7 +30,7 @@ test('fixed-point node mass cannot wrap a u32 even with the whole pool on one no
 test('density layout matches the buffer gpu.js allocates, without per-cell centroids', () => {
   assert.match(section, /struct DensityCell \{ mass: atomic<u32>, unused: array<u32, 3> \}/);
   assert.match(section, /const GRID = 128u;/);
-  assert.match(gpu, /this\.density=device\.createBuffer\(\{size:128\*128\*16,/);
+  assert.match(gpu, /this\.density=device\.createBuffer\(\{size:128\*128\*16\*17,/);
   assert.doesNotMatch(section, /atomic<i32>|center|centroid/i, 'no centroid attractor/repulsor lattice');
 });
 

@@ -69,14 +69,15 @@ async function harness(section) {
   const buffers = {
     0: device.createBuffer({ size: capacity * 64, usage: S | D | C }),
     1: device.createBuffer({ size: 2048, usage: GPUBufferUsage.UNIFORM | D }),
-    2: device.createBuffer({ size: GRID * GRID * 16, usage: S | D | C }),
+    2: device.createBuffer({ size: GRID * GRID * 16 * 17, usage: S | D | C }),
     3: device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | D }),
     6: device.createBuffer({ size: 256, usage: S | D | C }),
   };
   const pipelines = {}, uses = { seedParticles: [0, 1, 3], binParticles: [0, 1, 2], probeSeparation: [1, 2, 4, 5], stepSeparation: [0, 1, 2], phaseHistogram: [0, 1, 6] };
+  if (section.includes('fn reduceDensity(')) uses.reduceDensity = [2];
   for (const entryPoint of Object.keys(uses)) pipelines[entryPoint] = await device.createComputePipelineAsync({ layout: 'auto', compute: { module, entryPoint } });
   const group = (entry, extra = {}) => device.createBindGroup({ layout: pipelines[entry].getBindGroupLayout(0), entries: uses[entry].map(binding => ({ binding, resource: { buffer: extra[binding] ?? buffers[binding] } })) });
-  const groups = Object.fromEntries(['seedParticles', 'binParticles', 'stepSeparation', 'phaseHistogram'].map(e => [e, group(e)]));
+  const groups = Object.fromEntries(['seedParticles', 'binParticles', 'stepSeparation', 'phaseHistogram', ...(uses.reduceDensity ? ['reduceDensity'] : [])].map(e => [e, group(e)]));
   let count = 0;
   const pass = (encoder, entry, workgroups, bindGroup = groups[entry]) => { const p = encoder.beginComputePass(); p.setPipeline(pipelines[entry]); p.setBindGroup(0, bindGroup); p.dispatchWorkgroups(workgroups); p.end(); };
   const read = async (buffer, size, Type = Float32Array) => {
@@ -86,7 +87,7 @@ async function harness(section) {
   };
   // clock.x advances per step as in gpu.js, so any per-frame behaviour keyed on time is exercised.
   const params = (n, time = 0) => { const u = new Float32Array(512); u.set([time, DT, ASPECT, n]); u[312] = 1; device.queue.writeBuffer(buffers[1], 0, u); count = n; };
-  const bin = encoder => { encoder.clearBuffer(buffers[2]); pass(encoder, 'binParticles', Math.ceil(count / 256)); };
+  const bin = encoder => { encoder.clearBuffer(buffers[2]); pass(encoder, 'binParticles', Math.ceil(count / 256)); if (uses.reduceDensity) pass(encoder, 'reduceDensity', GRID * GRID / 256); };
   return {
     device, errors, capacity,
     seed(n, mode, cx = 0, cy = 0, sigma = 0) {
@@ -105,6 +106,12 @@ async function harness(section) {
       await device.queue.onSubmittedWorkDone();
     },
     async phases() { const e = device.createCommandEncoder(); e.clearBuffer(buffers[6]); pass(e, 'phaseHistogram', Math.ceil(count / 256)); device.queue.submit([e.finish()]); return read(buffers[6], 256, Uint32Array); },
+    async binTiming(iterations = 20) {
+      const batch = () => { const e = device.createCommandEncoder(); for (let i = 0; i < iterations; i++) bin(e); device.queue.submit([e.finish()]); };
+      batch(); await device.queue.onSubmittedWorkDone();
+      const start = performance.now(); batch(); await device.queue.onSubmittedWorkDone();
+      return (performance.now() - start) / iterations;
+    },
     densityMass: async () => read(buffers[2], GRID * GRID * 16, Uint32Array),
     positions: async () => read(buffers[0], count * 64),
   };
@@ -204,6 +211,21 @@ async function stackBurst(h) {
   radius /= n;
   return { particles: n, meanRadiusAfter1s: radius, nonFinite, pass: !nonFinite && radius > 0.005 };
 }
+
+// Fixed positions isolate contention from simulation motion and render cost.
+export async function runDensityBenchmark(section = SECTION) {
+  const h = await harness(section);
+  try {
+    const result = {};
+    for (const [name, mode] of [['dispersed', 0], ['pinched', 2]]) {
+      h.seed(h.capacity, mode, .3, .2);
+      result[name] = { particles: h.capacity, ms: await h.binTiming() };
+    }
+    result.errors = h.errors;
+    return result;
+  } finally { h.device.destroy(); }
+}
+window.runDensityBenchmark = runDensityBenchmark;
 
 export async function runGridSeparation(section = SECTION) {
   const h = await harness(section), n = h.capacity;

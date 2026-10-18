@@ -103,9 +103,11 @@ fn accretionVertex(corner: vec2f, instance: u32) -> VertexOutput {
   let widthPx = select(select(select(0.9, 1.05, layer > 0.5), 1.25, layer > 1.5), 1.1, smoke) * (1.0 + params.sound.z * 0.12 + heat * 0.15) * persp;
   let w = widthPx * pixel * defocus * (1.0 + lit * 0.35);
   let trail = min(speed * (0.016 + 0.009 * heat + 0.008 * energy), 0.06) * (1.0 - lit * 0.92);
-  let halfLength = trail * 0.5 + w * 3.0;
+  // Trim the faint Gaussian outskirts; bloom supplies the wider glow.
+  // Compared with three widths, stationary quads rasterise 56% fewer pixels.
+  let halfLength = trail * 0.5 + w * 2.0;
   let center = head - dir * trail * 0.5;
-  let world = center + dir * corner.x * halfLength + perp * corner.y * w * 3.0;
+  let world = center + dir * corner.x * halfLength + perp * corner.y * w * 2.0;
 
   // Hue follows screen x and strand; the far layer is dim, deeper particles dimmer, fast and hot ones brighter.
   let strand = p.extra.x;
@@ -137,7 +139,7 @@ fn accretionVertex(corner: vec2f, instance: u32) -> VertexOutput {
 
   var output: VertexOutput;
   output.position = vec4f(world.x / params.clock.z, world.y, 0.0, 1.0);
-  output.uv = vec2f(corner.x * halfLength / w, corner.y * 3.0);
+  output.uv = vec2f(corner.x * halfLength / w, corner.y * 2.0);
   if (params.simulation.x > 2.5 && params.simulation.x < 3.5 && params.simulation.y > 0.5) {
     let bass = pow(clamp(params.sound.x,0.0,1.0),1.7);
     let high = pow(clamp(params.sound.z,0.0,1.0),1.35);

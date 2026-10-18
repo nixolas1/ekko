@@ -22,9 +22,9 @@ try {
     runs.head = head.slice(0, head.indexOf('\nfn tri('));
   }
   for (const [name, section] of Object.entries(runs)) {
-    const result = await page.evaluate(s => window.runGridSeparation(s), section);
+    const result = await page.evaluate(({s, benchmark}) => benchmark ? window.runDensityBenchmark(s) : window.runGridSeparation(s), {s:section, benchmark:process.argv.includes('--benchmark')});
     console.log(name, JSON.stringify(result, null, 2));
-    if (name === 'current' && !result.pass) failed = true;
+    if (name === 'current' && (result.pass === false || result.errors.length)) failed = true;
   }
   if (errors.length) { console.error(errors); failed = true; }
 } finally { await browser.close(); await server.close(); }

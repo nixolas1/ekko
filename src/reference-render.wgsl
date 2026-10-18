@@ -49,7 +49,7 @@ fn spectralLight(xy: vec2f, response: f32) -> vec4f {
   return vec4f(mix(lightPalette(params.display.x, f32(i) / 8.0) * a, lightPalette(params.display.x, f32(j) / 8.0) * b, w), mix(a, b, w));
 }
 
-@vertex fn referenceVertex(@builtin(vertex_index) vertexId: u32, @builtin(instance_index) id: u32) -> ReferenceOutput {
+fn referenceParticle(vertexId: u32, id: u32) -> ReferenceOutput {
   let corner = vec2f(f32(vertexId & 1u), f32(vertexId >> 1u)) * 2.0 - 1.0;
   let p = particles[id];
   let mode = params.simulation.x;
@@ -195,4 +195,38 @@ fn spectralLight(xy: vec2f, response: f32) -> vec4f {
   let beyond = max(abs(input.uv.x) - input.halfLength, 0.0);
   let r2 = beyond * beyond + input.uv.y * input.uv.y;
   return vec4f(input.color * exp(-0.5 * r2), 0.0);
+}
+
+@vertex fn referenceVertex(@builtin(vertex_index) vertexId: u32, @builtin(instance_index) id: u32) -> ReferenceOutput {
+  return referenceParticle(vertexId, id);
+}
+
+// Spectral alone uses the completed pressure grid as a local overlap estimate.
+// This declaration reads the same 16-byte cells written by particles.wgsl.
+@group(0) @binding(2) var<storage, read> renderDensity: array<vec4u>;
+@vertex fn spectralVertex(@builtin(vertex_index) vertexId: u32, @builtin(instance_index) id: u32) -> ReferenceOutput {
+  let p = particles[id];
+  let frame = u32(max(params.clock.x, 0.0) * 60.0);
+  let shift = vec2f(vec2u(frame * 3242174889u, frame * 2447445413u) >> vec2u(8u)) / 16777216.0;
+  let g = clamp((p.position.xy / vec2f(max(params.clock.z, .01), 1.0) * .5 + .5) * 128.0 - shift, vec2f(0.0), vec2f(127.0));
+  let base = min(vec2u(g), vec2u(126u));
+  let f = g - vec2f(base);
+  let i = base.y * 128u + base.x;
+  let mass = mix(mix(f32(renderDensity[i].x), f32(renderDensity[i + 1u].x), f.x),
+                 mix(f32(renderDensity[i + 128u].x), f32(renderDensity[i + 129u].x), f.x), f.y) / 1024.0;
+  // Keep all sparse filaments. In dense patches retain several samples per pixel
+  // of a grid cell, with at least 1/64 of the particles even in a collapsed stack.
+  let budget = max(256.0, params.display.y * params.display.z / (128.0 * 128.0) * 4.0);
+  let keep = clamp(budget / max(mass, 1.0), 1.0 / 64.0, 1.0);
+  // Stable independent IDs avoid temporal random shimmer and emission-band bias.
+  if (rnd(id, 91u) >= keep) {
+    var culled: ReferenceOutput;
+    culled.position = vec4f(2.0, 2.0, 2.0, 1.0);
+    return culled;
+  }
+  var o = referenceParticle(vertexId, id);
+  // Preserve expected HDR light (including bloom) without changing simulation,
+  // particle lifetimes, the smoke volume or the user's selected particle count.
+  o.color /= keep;
+  return o;
 }

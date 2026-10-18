@@ -21,7 +21,7 @@ import { LOCAL_TRACKS, loadTrackFile, resolveTrackId, trackById, trackLabel } fr
 const $=id=>document.getElementById(id), settings=settingsFromURL(location.href,loadSettings());
 const writeURL=createURLWriter();
 const engine=new ParticleEngine($('scene')), sound=new AudioInput(), handForces=new HandForces();
-Object.assign(engine,{count:settings.count,palette:settings.palette,effect:settings.effect,persistent:settings.persistent,resolution:settings.resolution});
+Object.assign(engine,{count:settings.count,palette:settings.palette,effect:settings.effect,persistent:settings.persistent,resolution:settings.resolution,optimizeDenseGlow:settings.optimizeDenseGlow});
 sound.gain=settings.gain;
 let physicsMode=settings.physicsMode;
 let showHands=settings.showHands;
@@ -46,7 +46,7 @@ engine.onError=gpuError;
 function persist(){
   if(restoring||shuttingDown||showcaseSnapshot)return;
   if(sound.mode==='file'&&sound.element)audioSelection={...audioSelection,position:sound.element.currentTime,playing:!sound.element.paused};
-  const current={resolution:engine.resolution,pullPower,pushPower,pointSize,count:autoCount?settings.count:engine.count,autoCount,showHands,maxHands:tracker.options.maxHands,palette:engine.palette,effect:engine.effect,persistent:engine.persistent,physicsMode,modeSettings,gain:sound.gain,paused,immersive:document.body.classList.contains('immersive'),audio:{...audioSelection,track:audioSelection.kind==='reference'?audioSelection.track:$('track-select').value||audioSelection.track}};
+  const current={resolution:engine.resolution,optimizeDenseGlow:engine.optimizeDenseGlow,pullPower,pushPower,pointSize,count:autoCount?settings.count:engine.count,autoCount,showHands,maxHands:tracker.options.maxHands,palette:engine.palette,effect:engine.effect,persistent:engine.persistent,physicsMode,modeSettings,gain:sound.gain,paused,immersive:document.body.classList.contains('immersive'),audio:{...audioSelection,track:audioSelection.kind==='reference'?audioSelection.track:$('track-select').value||audioSelection.track}};
   if(pendingTrack)current.audio={...current.audio,kind:'reference',track:pendingTrack,position:0};
   saveSettings(current);writeURL(current);
 }
@@ -100,6 +100,8 @@ function pointSizeUI(){
   $('point-size').setAttribute('aria-valuetext',pointSize.toFixed(2)+'×');
 }
 pointSizeUI();$('point-size').oninput=e=>{pointSize=Number(e.target.value);pointSizeUI();persist();};
+$('optimize-dense-glow').checked=engine.optimizeDenseGlow;
+$('optimize-dense-glow').onchange=e=>{engine.optimizeDenseGlow=e.target.checked;engine.dirty=true;persist();};
 $('resolution').value=engine.resolution;$('resolution').onchange=e=>{engine.resolution=e.target.value;engine.renderScale=1;engine.resize(true);adaptiveQuality.reset();persist();};
 $('max-hands').value=String(settings.maxHands);$('max-hands').onchange=async e=>{tracker.options.maxHands=Number(e.target.value);persist();if(tracker.active){tracker.stop();resetCamera();await toggleCamera();}};
 function audioUI(){

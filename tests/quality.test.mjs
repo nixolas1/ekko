@@ -259,7 +259,7 @@ test('[mock device] dispatch/draw follow the count, count is clamped, buffer is 
   const { map } = uniformLayout(), stride = gpuConstant('PARTICLE_BYTES');
   await withEngine((engine, stats) => {
     engine.frame(0.016, [0, 0, 0, 0], [], false);
-    assert.deepEqual(stats.clears, [[0, 131072 * stride]]); assert.deepEqual(stats.dispatches, [512,512]);
+    assert.deepEqual(stats.clears, [[0, 131072 * stride]]); assert.deepEqual(stats.dispatches, [512,64,512]);
     assert.ok(stats.draws.some(d => d[1] === 131072), 'particle draw must be instanced by count');
     engine.frame(0.016, [0, 0, 0, 0], [], false);
     assert.equal(stats.clears.length, 1, 'unchanged count must not clear again');
