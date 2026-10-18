@@ -1,3 +1,12 @@
+// Main particle renderer, with common-shader.wgsl prepended by gpu.js. The CPU
+// draws four vertices per instance as a triangle strip; each instance fetches
+// one simulated Particle and expands it into a camera-facing streak quad.
+// No mesh vertex buffer or per-particle CPU draw call is needed.
+//
+// gpu.js enables additive blending into an rgba16float HDR target. Overlapping
+// streaks accumulate light without depth sorting; this models luminous particles,
+// not opaque objects hiding one another. post-shader.wgsl adds bloom and maps HDR
+// to display brightness. Fine smoke modes use reference-render.wgsl instead.
 @group(0) @binding(0) var<storage, read> particles: array<Particle>;
 @group(0) @binding(1) var<uniform> params: Parameters;
 struct VertexOutput {
@@ -14,6 +23,8 @@ fn ramp(a: vec3f, b: vec3f, c: vec3f, d: vec3f, t: f32) -> vec3f {
 }
 fn palette(t: f32) -> vec3f { return lightPalette(params.display.x, t); }
 @vertex fn vertex(@builtin(vertex_index) vertexId: u32, @builtin(instance_index) id: u32) -> VertexOutput {
+  // Bit operations generate the four (-1/+1, -1/+1) corners from vertex ids 0..3.
+  // The head follows the particle; the quad extends backwards along velocity.
   let corner = vec2f(f32(vertexId & 1u), f32(vertexId >> 1u)) * 2.0 - 1.0;
   let p = particles[id];
   let smoke = params.simulation.x > 1.5;
@@ -21,6 +32,8 @@ fn palette(t: f32) -> vec3f { return lightPalette(params.display.x, t); }
   let head = p.position.xy * persp;
   let vel = p.velocity.xy * persp;
   let speed = length(vel);
+  // A stationary particle has no direction. Use a fixed axis and a safe divisor
+  // so normalisation cannot produce NaNs, including inside a select expression.
   let dir = select(vec2f(1.0, 0.0), vel / max(speed, 0.0001), speed > 0.002);
   let perp = vec2f(-dir.y, dir.x);
   let layer = p.extra.z;
@@ -36,7 +49,12 @@ fn palette(t: f32) -> vec3f { return lightPalette(params.display.x, t); }
   let coc = clamp((abs(p.position.z - focus) - 0.12) * 2.0, 0.0, 1.0);
   let defocus = 1.0 + coc * select(0.2, 0.5 + min(energy, 1.0) * 1.2, smoke);
 
-  // Width is a fixed pixel count and the streak length is clamped, so fill cost per particle is bounded.
+  // Convert pixels to scene units using 2/height: the visible y range is two units.
+  // Width is specified in pixels (then scaled for depth/defocus) and trail length
+  // is capped in scene units. This limits rasterised area at a given resolution;
+  // the trail can still cover more pixels at higher output resolutions.
+  // Small quads matter: millions of overlapping fragments can cost more than
+  // the particle update itself, even when their final Gaussian colour is tiny.
   let pixel = 2.0 / params.display.z;
   let widthPx = select(select(select(0.9, 1.05, layer > 0.5), 1.25, layer > 1.5), 1.1, smoke) * (1.0 + params.sound.z * 0.12 + heat * 0.15) * persp;
   let w = widthPx * pixel * defocus * (1.0 + lit * 0.35);
@@ -83,11 +101,19 @@ fn palette(t: f32) -> vec3f { return lightPalette(params.display.x, t); }
     let flash = bass * 2.5 + high * (0.4 + 3.0 * ribbon) + params.simulation.z * 2.0;
     color += palette(hue) * flash;
   }
+  // Inverse-square defocus compensation offsets the growing area of blurred
+  // points. This is approximate for long streaks, whose trail length stays fixed
+  // while their width and rounded ends expand; reference-render.wgsl integrates
+  // the streak area explicitly for more precise energy normalisation.
   output.color = color * intensity / (defocus * defocus);
   output.lengthRatio = trail / w;
   return output;
 }
 @fragment fn fragment(input: VertexOutput) -> @location(0) vec4f {
+  // Distance to a line segment makes a capsule: Gaussian across the streak,
+  // rounded at its ends. This analytic profile replaces a sprite texture fetch.
+  // Taper dims the tail. Alpha is zero because gpu.js adds RGB directly with
+  // one/one blend factors; it is not used to make these particles invisible.
   let halfLength = input.lengthRatio * 0.5;
   let beyond = max(abs(input.uv.x) - halfLength, 0.0);
   let r2 = beyond * beyond + input.uv.y * input.uv.y;

@@ -1,4 +1,8 @@
 import './style.css';
+import './showcase.css';
+import {SHOWCASE_CHAPTERS,ShowcaseTimeline,showcaseSample} from './showcase';
+import {ShowcaseView} from './showcase-view';
+import {createShowcaseScore} from './showcase-music';
 import { ParticleEngine } from './gpu';
 import { AudioInput } from './audio';
 import { Tracking } from './tracking';
@@ -20,6 +24,9 @@ sound.gain=settings.gain;
 let physicsMode=settings.physicsMode;
 let showHands=settings.showHands;
 const handOverlay=new HandOverlay($('hand-demo'));handOverlay.setEnabled(showHands);
+const showcase=new ShowcaseTimeline(),showcaseSound=new AudioInput();
+let showcaseSnapshot=null,showcaseRun=0,showcaseStarting=false,showcaseScore=null,showcaseSource=null,showcaseMuted=false,showcaseAudioFailed=false;
+const showcaseView=new ShowcaseView(showcaseAction);
 const mouseHand={x:0,y:0,active:false,held:false,metaKey:false};
 const modeSettings=settings.modeSettings;
 // Playback and scene pause are session-only; links never restore a frozen scene.
@@ -29,10 +36,10 @@ const adaptiveQuality=new AdaptiveQuality();let autoCount=settings.autoCount;
 let ready=false,trackingData=null,trackingTime=0,cameraStarting=false,noticeTimer;
 let audioSelection={...settings.audio,playing:false},restoring=true,shuttingDown=false,audioRevision=0,pendingTrack=null,transportBusy=false,transportToken=0;
 function notice(message){$('notice').textContent=message;$('notice').hidden=false;clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>$('notice').hidden=true,9000);}
-function gpuError(message){ready=false;$('gpu-error').hidden=false;$('gpu-error-message').textContent=message;$('gpu-status').textContent='WebGPU unavailable';}
+function gpuError(message){if(showcaseSnapshot)stopShowcase();ready=false;$('showcase-start').disabled=true;$('gpu-error').hidden=false;$('gpu-error-message').textContent=message;$('gpu-status').textContent='WebGPU unavailable';}
 engine.onError=gpuError;
 function persist(){
-  if(restoring||shuttingDown)return;
+  if(restoring||shuttingDown||showcaseSnapshot)return;
   if(sound.mode==='file'&&sound.element)audioSelection={...audioSelection,position:sound.element.currentTime,playing:!sound.element.paused};
   const current={resolution:engine.resolution,pullPower,pushPower,count:autoCount?settings.count:engine.count,autoCount,showHands,maxHands:tracker.options.maxHands,palette:engine.palette,effect:engine.effect,persistent:engine.persistent,physicsMode,modeSettings,gain:sound.gain,paused,immersive:document.body.classList.contains('immersive'),audio:{...audioSelection,track:audioSelection.kind==='reference'?audioSelection.track:$('track-select').value||audioSelection.track}};
   if(pendingTrack)current.audio={...current.audio,kind:'reference',track:pendingTrack,position:0};
@@ -43,6 +50,7 @@ const bars=Array.from({length:4},()=>{const bar=document.createElement('i');$('s
 function mapPoint(p){const aspect=innerWidth/innerHeight,cameraAspect=($('camera').videoWidth||640)/($('camera').videoHeight||480);return [(1-2*p.x)*Math.min(aspect,cameraAspect),(1-2*p.y)*Math.min(1,aspect/cameraAspect)];}
 const gestureLabels={wand:'Wand',vortex:'Vortex',shockwave:'Shockwave',pull:'Gather',push:'Push'};
 const tracker=new Tracking($('camera'),data=>{
+  if(showcaseSnapshot)return; // Real camera data never drives a simulated demonstration.
   trackingData=data;trackingTime=performance.now();handForces.update(data,trackingTime,mapPoint);
   $('camera-count').textContent=`${data.hands.length} hands`;
   for(const point of data.bursts){const [x,y]=mapPoint(point);engine.explode(x,y);}
@@ -201,7 +209,7 @@ async function restoreAudio(){
     }
     // Saved microphone/tab choices never prompt or capture automatically.
   }catch(error){if(revision===audioRevision)notice(error.message);}
-  finally{restoring=false;audioUI();persist();}
+  finally{restoring=false;$('showcase-start').disabled=!ready;audioUI();persist();}
 }
 $('sensitivity').value=String(sound.gain);$('sensitivity-value').textContent=`${sound.gain.toFixed(1)}×`;
 $('sensitivity').oninput=e=>{sound.gain=Number(e.target.value);$('sensitivity-value').textContent=`${sound.gain.toFixed(1)}×`;persist();};
@@ -244,6 +252,7 @@ function updateSettingsPeek(e){
  if(!settingsPeekTimer)settingsPeekTimer=setTimeout(()=>{setSettingsPeek(false);settingsPeekTimer=null;},240);
 }
 function updatePointer(e){
+ if(showcaseSnapshot)return;
  clearTimeout(pointerIdleTimer);
  document.body.classList.remove('pointer-idle');
  updateSettingsPeek(e);
@@ -286,14 +295,22 @@ async function toggleFullscreen(){
   else {setImmersive(true);try{await document.documentElement.requestFullscreen();}catch{setImmersive(false);notice('Fullscreen was blocked. Press H to hide the controls.');}}
 }
 addEventListener('dblclick',event=>{
+  if(showcaseSnapshot)return;
   if(event.metaKey||event.ctrlKey||event.altKey||event.shiftKey||event.button!==0)return;
   if(event.target.closest('button,input,select,textarea,a,.panel,video'))return;
   event.preventDefault();void toggleFullscreen();
 });
 $('immersive').onclick=toggleFullscreen;
-document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement)setImmersive(false);});
+document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&!showcaseSnapshot)setImmersive(false);});
 setImmersive(settings.immersive);
 addEventListener('keydown',e=>{
+  if(showcaseSnapshot){
+    if(e.key==='Escape'){e.preventDefault();stopShowcase();return;}
+    if(e.code==='Space'&&!e.target.closest('button,input')){e.preventDefault();showcaseAction('pause');}
+    if(e.key==='ArrowRight'||e.key.toLowerCase()==='n'){e.preventDefault();showcaseAction('next');}
+    if(e.key==='ArrowLeft'){e.preventDefault();showcaseAction('previous');}
+    return;
+  }
   if(e.key==='Meta')mouseHand.metaKey=true;
   const action=shortcutAction(e,document.activeElement);if(!action)return;
   e.preventDefault();
@@ -304,28 +321,136 @@ addEventListener('keydown',e=>{
   if(action==='hide')setImmersive(!document.body.classList.contains('immersive'));
   if(action==='escape')setImmersive(false);
 });
+// Tour settings are temporary. Only the explicit Try action saves a chapter.
+function applyShowcaseChapter(){
+  const chapter=showcase.chapter;physicsMode=chapter.mode;engine.palette=chapter.palette;engine.effect=0;
+  modeSettings[physicsMode]={speed:1,glow:1.6,turbulence:1.15,emission:1.65,visibility:1};
+  engine.dirty=true;adaptiveQuality.reset();modeUI();paletteUI();
+  // Drop queued input from the preceding chapter, especially when paused/skipping.
+  engine.pending.length=0;engine.mouse=[0,0,.18,0];
+}
+async function playShowcaseMusic(token){
+  showcaseStarting=true;showcaseAudioFailed=false;showcaseView.message('Preparing music…');
+  try{
+    const source=showcaseSource;
+    // Resume in the initiating click, before decoding/generating the score.
+    const resumed=source.context();
+    if(source===showcaseSound&&!showcaseScore)showcaseScore=createShowcaseScore();
+    await resumed;if(token!==showcaseRun)return;
+    if(source===showcaseSound){
+      if(!await source.file(showcaseScore,{autoplay:true}))return;
+      if(showcaseMuted)source.source.disconnect(source.ctx.destination);
+    }
+    else if(source.element)await source.element.play();
+    if(token!==showcaseRun)return;
+    if(showcase.paused||showcase.complete)source.element?.pause();
+    showcaseView.muted(showcaseMuted);showcaseView.message('');
+  }catch(error){
+    if(token===showcaseRun){showcaseAudioFailed=true;showcaseView.message('Music could not start. Select Retry music, or continue watching without sound.');showcaseView.root.querySelector('[data-tour=mute]').textContent='Retry music';}
+  }finally{if(token===showcaseRun)showcaseStarting=false;}
+}
+async function startShowcase(){
+  if(!ready||restoring||showcaseSnapshot)return;
+  if(transportBusy||pendingTrack){notice('Wait for the current audio load, then start the tour.');return;}
+  persist();writeURL.flush();
+  showcaseSnapshot={mode:physicsMode,palette:engine.palette,effect:engine.effect,tuning:structuredClone(modeSettings),count:engine.count,autoCount,renderScale:engine.renderScale,paused,pullPower,pushPower,immersive:document.body.classList.contains('immersive'),url:location.href,
+    element:sound.element,audioPosition:sound.element?.currentTime||0,audioPlaying:!!sound.element&&!sound.element.paused};
+  showcaseSource=['file','mic','tab'].includes(sound.mode)?sound:showcaseSound;
+  showcaseSound.gain=2;showcaseMuted=false;showcaseAudioFailed=false;
+  const live=['mic','tab'].includes(showcaseSource.mode);
+  showcaseView.root.querySelector('.showcase-music').textContent=showcaseSource===showcaseSound?'Original score · First light':live?'Your live audio · playback stays in its source':'Your selected music';
+  const mute=showcaseView.root.querySelector('[data-tour=mute]');mute.disabled=live;showcaseView.muted(false);if(live)mute.textContent='Live audio';
+  showcase.start();showcaseView.show();clearPointer();handOverlay.setEnabled(false);
+  document.body.classList.add('showcase-active');document.querySelector('header').inert=true;document.querySelector('footer').inert=true;
+  setImmersive(true);paused=false;pullPower=pushPower=.65;autoCount=true;engine.count=Math.min(524288,engine.capacity);engine.fill=1;
+  applyShowcaseChapter();showcaseView.render(showcase,showcaseSample(showcase.chapter,0));
+  await playShowcaseMusic(++showcaseRun);
+}
+function stopShowcase(keepMode=false,resumeAudio=true){
+  if(!showcaseSnapshot)return;
+  const saved=showcaseSnapshot,chosen={mode:physicsMode,palette:engine.palette,effect:engine.effect,tuning:{...modeSettings[physicsMode]}};
+  ++showcaseRun;showcaseStarting=false;showcase.stop();showcaseView.hide();
+  if(showcaseMuted&&showcaseSource===sound&&sound.source)sound.source.connect(sound.ctx.destination);
+  showcaseSound.stop();showcaseSource=null;
+  Object.assign(modeSettings,saved.tuning);physicsMode=saved.mode;engine.palette=saved.palette;engine.effect=saved.effect;
+  if(keepMode){physicsMode=chosen.mode;engine.palette=chosen.palette;engine.effect=chosen.effect;modeSettings[physicsMode]=chosen.tuning;}
+  engine.count=saved.count;engine.renderScale=saved.renderScale;autoCount=saved.autoCount;paused=keepMode?false:saved.paused;pullPower=saved.pullPower;pushPower=saved.pushPower;
+  engine.pending.length=0;clearPointer();handForces.clear();handOverlay.clear();handOverlay.setEnabled(showHands);
+  document.body.classList.remove('showcase-active');document.querySelector('header').inert=false;document.querySelector('footer').inert=false;
+  setImmersive(keepMode?false:saved.immersive);modeUI();paletteUI();pauseUI();forceUI();$('effect').value=String(engine.effect);adaptiveQuality.reset();engine.dirty=true;
+  if(saved.element&&saved.element===sound.element){
+    sound.element.pause();sound.element.currentTime=saved.audioPosition;
+    if(saved.audioPlaying&&resumeAudio)void sound.element.play().catch(()=>notice('Press Space to resume your music.'));
+  }
+  history.replaceState(history.state,'',saved.url);showcaseSnapshot=null;
+  if(resumeAudio){if(!saved.immersive||keepMode)$('showcase-start').focus();else document.activeElement?.blur();audioUI();persist();}
+}
+function showcasePlaybackFailed(){
+  if(!showcase.active)return;showcaseAudioFailed=true;showcaseView.message('Music could not resume. Select Retry music to try again.');showcaseView.root.querySelector('[data-tour=mute]').textContent='Retry music';
+}
+function showcaseAction(action,value){
+  if(!showcase.active)return;
+  if(action==='exit'||action==='try'){stopShowcase(action==='try');return;}
+  if(action==='loop'){showcase.loop=value;return;}
+  if(action==='mute'){
+    if(showcaseAudioFailed){void playShowcaseMusic(showcaseRun);return;}
+    if(!showcaseSource?.element)return;
+    // Disconnect only the audible destination; the analyser must keep receiving
+    // music when muted so visuals do not collapse into silence.
+    showcaseMuted=!showcaseMuted;
+    if(showcaseMuted)showcaseSource.source.disconnect(showcaseSource.ctx.destination);else showcaseSource.source.connect(showcaseSource.ctx.destination);
+    showcaseView.muted(showcaseMuted);return;
+  }
+  if(action==='pause'){
+    if(showcase.complete)return;showcase.paused=!showcase.paused;
+    if(showcase.paused)showcaseSource?.element?.pause();
+    else if(showcaseSource?.element)void showcaseSource.element.play().catch(showcasePlaybackFailed);
+  }else if(['next','previous','chapter'].includes(action)){
+    if(action==='next'&&!showcase.complete&&showcase.index===SHOWCASE_CHAPTERS.length-1&&!showcase.loop){showcase.complete=true;showcase.elapsed=showcase.chapter.duration;showcaseSource?.element?.pause();}
+    else{
+      showcase.seek(action==='chapter'?value:action==='previous'?showcase.index-1:showcase.complete||showcase.index===SHOWCASE_CHAPTERS.length-1?0:showcase.index+1);
+      applyShowcaseChapter();
+      if(!showcase.paused&&!showcaseStarting&&showcaseSource?.element)void showcaseSource.element.play().catch(showcasePlaybackFailed);
+    }
+  }
+  showcaseView.render(showcase,showcaseSample(showcase.chapter,showcase.elapsed,innerWidth/innerHeight));
+}
+$('showcase-start').onclick=startShowcase;
+
 let resizePending=false;addEventListener('resize',()=>{resizePending=true;});
 const saveTimer=setInterval(persist,1000);
-function teardown(){youtubeAbort?.abort();persist();writeURL.flush();shuttingDown=true;clearInterval(saveTimer);clearTimeout(noticeTimer);clearTimeout(pointerIdleTimer);clearTimeout(settingsPeekTimer);cancelAnimationFrame(raf);tracker.stop();sound.stop();sound.ctx?.close();engine.dispose();}
+function teardown(){if(showcaseSnapshot)stopShowcase(false,false);showcaseSound.stop();showcaseSound.ctx?.close();showcaseView.dispose();youtubeAbort?.abort();persist();writeURL.flush();shuttingDown=true;clearInterval(saveTimer);clearTimeout(noticeTimer);clearTimeout(pointerIdleTimer);clearTimeout(settingsPeekTimer);cancelAnimationFrame(raf);tracker.stop();sound.stop();sound.ctx?.close();engine.dispose();}
 addEventListener('pagehide',teardown,{once:true});
-document.addEventListener('visibilitychange',()=>{if(document.hidden)persist();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){if(showcase.active&&!showcase.paused&&!showcase.complete)showcaseAction('pause');persist();}});
 let last=0,lastUI=0,frames=[],raf=0;
 function frame(now){
   raf=requestAnimationFrame(frame);handOverlay.render(now,tracker.active);if(!ready||document.hidden){last=now;return;}if(resizePending){engine.resize();resizePending=false;}
   const dt=last?(now-last)/1000:1/60;last=now;
-  const hands=tracker.active?handForces.sample(now):[];
+  let demo=null;
+  if(showcase.active){
+    const event=showcaseStarting?{changed:false,bursts:[]}:showcase.advance(dt);
+    if(event.changed)applyShowcaseChapter();
+    demo=showcaseSample(showcase.chapter,showcase.elapsed,innerWidth/innerHeight);
+    for(const _ of event.bursts){const hand=demo.hands[0];if(hand)engine.explode(hand.x,hand.y,1.2);}
+    if(showcase.complete)showcaseSource?.element?.pause();
+    showcaseView.render(showcase,demo);
+    const pointer=demo.pointer;engine.mouse=pointer&&!pointer.held?[pointer.x,pointer.y,.18,1]:[0,0,.18,0];
+  }
+  const hands=demo?demo.hands:tracker.active?handForces.sample(now):[];
   handMarkers.forEach((node,index)=>{const hand=hands[index];node.hidden=!hand;if(hand){node.style.left=`${(hand.x/(innerWidth/innerHeight)+1)*50}%`;node.style.top=`${(1-hand.y)*50}%`;node.classList.toggle('repel',hand.mode<0);node.firstChild.textContent=hand.mode<0?'Push':'Pull';}});
-  engine.musicActive=sound.mode==='mic'||sound.mode==='tab'||(sound.mode==='file'&&!!sound.element&&!sound.element.paused);
-  const audio=sound.sample(now/1000);engine.audioResponse=sound.gain;engine.musicTransient=sound.transient;engine.emissionBands=sound.emissionBands;engine.ringBands=sound.ringSpectrum.levels;engine.ringAttacks=sound.ringSpectrum.attacks;audio[3]=Math.max(audio[3],sound.transient*.8);
+  const activeSound=showcase.active?showcaseSource||showcaseSound:sound;
+  engine.musicActive=activeSound.mode==='mic'||activeSound.mode==='tab'||(activeSound.mode==='file'&&!!activeSound.element&&!activeSound.element.paused);
+  const audio=activeSound.sample(now/1000);engine.audioResponse=activeSound.gain;engine.musicTransient=activeSound.transient;engine.emissionBands=activeSound.emissionBands;engine.ringBands=activeSound.ringSpectrum.levels;engine.ringAttacks=activeSound.ringSpectrum.attacks;audio[3]=Math.max(audio[3],activeSound.transient*.8);
   // Hand pull/push is separate from the mouse obstacle; body joints never attract.
   const forces=hands.map(hand=>{
     const wand=hand.wand||0,vortex=hand.vortex||0,shock=hand.shockwave||0;
     const radius=(engine.persistent?.95:.65)*Math.max(0,1-wand-vortex-shock)+.22*wand+(hand.vortexRadius||.35)*vortex+shock;
     return [hand.x,hand.y,hand.strength*(hand.strength<0?pushPower:pullPower),radius,wand,vortex,hand.id,hand.vx,hand.vy];
   });
-  const mouseForce=mouseHandForce(mouseHand,engine.persistent,pullPower,pushPower);if(mouseForce)forces.push(mouseForce);
-  if(autoCount&&!paused&&!['smoke','fluid-ring'].includes(physicsMode)){const quality=adaptiveQuality.update(dt,engine.count,engine.renderScale,tracker.active&&tracker.backend==='GPU'?tracker.ms:0);if(quality){engine.count=quality.count;engine.renderScale=engine.resolution==='auto'?quality.scale:1;countUI();}}
-  engine.frame(dt,audio,forces,paused);frames.push(dt*1000);if(frames.length>90)frames.shift();
+  const mouseForce=mouseHandForce(demo?demo.pointer:mouseHand,engine.persistent,pullPower,pushPower);if(mouseForce)forces.push(mouseForce);
+  const scenePaused=showcase.active?(showcase.paused||showcase.complete||showcaseStarting):paused;
+  if(autoCount&&!scenePaused&&!['smoke','fluid-ring'].includes(physicsMode)){const quality=adaptiveQuality.update(dt,engine.count,engine.renderScale,tracker.active&&tracker.backend==='GPU'?tracker.ms:0);if(quality){engine.count=quality.count;engine.renderScale=engine.resolution==='auto'?quality.scale:1;countUI();}}
+  engine.frame(dt,audio,forces,scenePaused);frames.push(dt*1000);if(frames.length>90)frames.shift();
   if(now-lastUI>150){
     lastUI=now; $('track-time').hidden=sound.mode!=='file';
     if(sound.element){const format=t=>`${Math.floor(t/60)}:${String(Math.floor(t%60)).padStart(2,'0')}`;$('track-time').textContent=`${format(sound.element.currentTime)} / ${Number.isFinite(sound.element.duration)?format(sound.element.duration):'…'}`;}
@@ -338,5 +463,5 @@ function frame(now){
   }
 }
 void restoreAudio();
-try{await engine.init();adaptiveQuality.maxCount=engine.capacity;engine.count=Math.min(engine.count,engine.capacity);for(const option of $('particles').options){if(option.value!=='auto')option.disabled=Number(option.value)>engine.capacity;}countUI();ready=true;$('gpu-error').hidden=true;$('gpu-error-message').textContent='';$('gpu-status').textContent='WebGPU active';void toggleCamera();raf=requestAnimationFrame(frame);}catch(error){gpuError(error.message);}
+try{await engine.init();adaptiveQuality.maxCount=engine.capacity;engine.count=Math.min(engine.count,engine.capacity);for(const option of $('particles').options){if(option.value!=='auto')option.disabled=Number(option.value)>engine.capacity;}countUI();ready=true;$('gpu-error').hidden=true;$('gpu-error-message').textContent='';$('gpu-status').textContent='WebGPU active';$('showcase-start').disabled=restoring;void toggleCamera();raf=requestAnimationFrame(frame);}catch(error){gpuError(error.message);}
 if(import.meta.hot)import.meta.hot.dispose(teardown);

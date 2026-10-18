@@ -1,4 +1,21 @@
-// Shared by particles.wgsl, render.wgsl and post-shader.wgsl. gpu.js prepends this file to each module.
+// Shader starting point: gpu.js prepends this source to every shader module;
+// WGSL files here do not import one another. The particle compute module also
+// appends reference-simulation.wgsl after particles.wgsl.
+//
+// Data stays on the GPU: compute updates the particle storage buffer, then the
+// vertex shaders read that same buffer to draw it. JavaScript uploads Parameters
+// once per frame for timing, audio and interaction, rather than uploading every
+// particle. Bindings in each module connect these declarations to gpu.js/fluid.js.
+//
+// Coordinates: scene y spans roughly -1..1, x spans -aspect..aspect, and +z is
+// towards the camera. Render shaders divide x by aspect to reach clip space.
+// clock.y is the simulation step in seconds (zero when paused); clock.x is time.
+//
+// Layout contract: four vec4f fields make Particle 64 bytes. Parameters is packed
+// in 16-byte vec4f slots, including its arrays. Keep field order and sizes in sync
+// with PARTICLE_BYTES, UNIFORM_FLOATS and Float32Array offsets in gpu.js.
+// The Particle annotations below describe sculpture mode. Smoke reuses these
+// slots for age/lifetime, and reference-simulation.wgsl documents its own layout.
 struct Particle {
   position: vec4f, // xyz, excitement 0..1 (weakens the spring, decays after a burst)
   velocity: vec4f, // xyz, seed
@@ -15,7 +32,7 @@ struct Parameters {
   extra: vec4f,   // bursts drained this frame, trail decay, exposure, bloom strength
   bursts: array<vec4f, 8>,  // x, y, serial, strength
   forceVel: array<vec4f, 32>, // smoothed velocity xy, Wand/Vortex blend weights zw
-  simulation: vec4f, // mode: 0 sculpture, 1 persistent, 2 smoke, 3 ring, 4 volume, 5 plume, 6 duet; audible input active, onset envelope, reserved
+  simulation: vec4f, // mode (see below), audible input active, onset envelope, audio response gain
   emissionLow: vec4f, // seven measured bands: bass to treble
   emissionHigh: vec4f,
   ringLevels: array<vec4f,3>, // nine ascending frequency bands
@@ -23,18 +40,28 @@ struct Parameters {
   mouse: vec4f, // world xy, radius, active
   tuning: vec4f, // speed, turbulence, glow, emission
 }
+// Shader mode numbers differ from the UI's flowMode: 0 sculpture, 1 persistent,
+// 2 fluid smoke, 3 particle ring, 4 spectral volume, 5 plume, 6 twin vortices,
+// 7 fluid ring, 8 lasting-glow plume. gpu.js routes 2/7 to fluid.js instead of
+// the particle compute pass; mode 7 shares the reference particle renderer.
 const TAU = 6.2831853;
+// Integer hashing gives reproducible variation without a random-state buffer.
+// Different salts let one particle have unrelated lifetime, colour and position
+// samples; reuse the same id/salt when a property should stay stable over time.
 fn pcg(v: u32) -> u32 {
   let state = v * 747796405u + 2891336453u;
   let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
   return (word >> 22u) ^ word;
 }
-// Independent uniform 0..1 stream per (id, salt).
+// Deterministic pseudo-random value in [0,1). Keeping the upper 24 bits makes the
+// integer exactly representable as f32 before scaling; no sample rounds up to 1.
 fn rnd(id: u32, salt: u32) -> f32 {
   return f32(pcg(pcg(id) ^ (salt * 2654435769u + 2135587861u)) >> 8u) / 16777216.0;
 }
 
 // One palette definition for particle lamps, smoke lighting and reference filaments.
+// These are linear HDR light values: components may exceed 1 until the final
+// post-process maps them to the display. Early clamping would remove bloom energy.
 fn lightRamp(a: vec3f, b: vec3f, c: vec3f, d: vec3f, t: f32) -> vec3f {
   let x = clamp(t, 0.0, 1.0) * 3.0;
   if (x < 1.0) { return mix(a, b, x); }
@@ -65,6 +92,9 @@ fn emissionLevel(lane: u32, low: vec4f, high: vec4f) -> f32 {
 }
 
 // Soft mouse obstacle: compact support, maximum repulsion at its centre.
+// The early return avoids force math outside the radius. 1-exp(-rate*dt) relaxes
+// velocity towards an outward target without overshooting that target, and
+// exp(-rate*dt) elsewhere provides decay that accounts for elapsed time.
 fn mouseVelocity(q:vec2f,v:vec2f,mouse:vec4f,dt:f32)->vec2f {
   let delta=q-mouse.xy;let distance=length(delta);let radius=max(mouse.z,.001);
   if(mouse.w<.5 || distance>=radius || dt<=0.0){return v;}
@@ -75,6 +105,9 @@ fn mouseVelocity(q:vec2f,v:vec2f,mouse:vec4f,dt:f32)->vec2f {
 
 // Continuous gesture blending, shared by all particle and fluid modes. A wand
 // gathers a tiny core; a vortex preserves an orbit instead of collapsing it.
+// delta points towards the hand; rotating its unit direction by 90 degrees gives
+// the tangent used for orbiting. gpu.js normalises the two gesture weights so
+// their sum is at most 1, leaving the remaining weight for the ordinary force.
 fn gestureFlow(base:vec2f,delta:vec2f,radius:f32,motion:vec2f,weights:vec2f)->vec2f {
   if(weights.x+weights.y<.0001){return base;}
   let d=length(delta);let n=delta/max(d,.001);let tangent=vec2f(-n.y,n.x);

@@ -40,7 +40,8 @@ test('loadTrackFile fetches the local path and reports a missing file in Norwegi
 test('main.js: song selection starts playback, reload stays paused, and stop cancels loads',()=>{
  const main=read('src/main.js'),html=read('index.html');
  assert.match(main,/\$\('track-select'\)\.onchange=[\s\S]*?loadLibraryTrack\(selection,\{autoplay:true\}\)/);
- assert.equal([...main.matchAll(/autoplay:true/g)].length,2,'only song selection and the Play button start playback');
+ assert.equal([...main.matchAll(/autoplay:true/g)].length,3,'song selection, Play and the explicitly started tour may autoplay');
+ assert.match(main,/\$\('showcase-start'\)\.onclick=startShowcase/,'tour music requires an explicit start action');
  assert.match(main,/async function toggleAudio[\s\S]*?loadLibraryTrack\(id,\{autoplay:true\}\)/);
  assert.match(main,/sound\.file\(file,\{autoplay:false,position:previous\.position\}\)/,'reload restores paused at the saved playhead');
  assert.match(main,/async function loadLibraryTrack[\s\S]*?const revision=\+\+audioRevision[\s\S]*?if\(revision!==audioRevision\)return false/);

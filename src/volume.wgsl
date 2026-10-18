@@ -1,6 +1,15 @@
 // Spectral smoke volume (simulation mode 4): particles are splatted into a coarse density grid,
-// the grid is smoothed and lit by a vertical light scan, then a half-width, half-height raymarch
+// the grid is smoothed and lit by a vertical light scan, then a reduced-resolution raymarch
 // produces premultiplied smoke colour plus opacity for post-shader.wgsl to upscale into the HDR scene.
+// gpu.js supplies common-shader.wgsl, allocates resources and orders the passes:
+// clear accum -> voxelize -> lightColumns -> rayFragment -> volumeFragment (post).
+// buildNoise runs once and is reused; paused frames reuse the last lit density grid.
+//
+// This hybrid spends different budgets on different features: reference-render.wgsl
+// draws sharp filaments at scene resolution, while this grid supplies broad smoke
+// shading. buildVolumeTargets() reduces each axis by at least 2 and caps the longest
+// axis at 640 pixels. writeVolume() currently chooses 24 ray samples, even at 4K.
+// Fewer pixels and bounded samples limit cost, at the expense of fine volume detail.
 @group(0) @binding(0) var<storage, read> particles: array<Particle>;
 @group(0) @binding(1) var<uniform> params: Parameters;
 @group(0) @binding(2) var<storage, read_write> accum: array<atomic<u32>>;
@@ -21,6 +30,10 @@ const VX = 96u;
 const VY = 64u;
 const VZ = 48u;
 const FIXED = 4096.0; // fixed point per splat; 262144 splats * 4096 < 2^32 even in one cell
+// Keep grid dimensions in sync with VOLUME_GRID in gpu.js. Integer fixed-point
+// accumulation uses atomicAdd so simultaneous particles cannot overwrite each
+// other. More fractional precision would reduce quantisation but reduce headroom
+// before integer overflow; the particle-sampling cap is part of this safety bound.
 
 fn cellIndex(c: vec3u) -> u32 { return (c.z * VY + c.y) * VX + c.x; }
 
@@ -28,6 +41,10 @@ fn cellIndex(c: vec3u) -> u32 { return (c.z * VY + c.y) * VX + c.x; }
 // so density moves continuously instead of popping between cells.
 @compute @workgroup_size(256)
 fn voxelize(@builtin(global_invocation_id) gid: vec3u) {
+  // Only every stride-th particle deposits, keeping at most 262144 samples.
+  // writeVolume() increases the density scale with stride and decreases it with
+  // total count, preserving approximate optical density as quality settings vary.
+  // This bounds atomic work but is a sampled approximation of the full cloud.
   let stride = u32(volume.shading.y);
   let id = gid.x * stride;
   if (id >= u32(params.clock.w)) { return; }
@@ -56,8 +73,11 @@ fn raw(c: vec3i) -> f32 {
   return f32(atomicLoad(&accum[cellIndex(vec3u(k))]));
 }
 
-// One thread per vertical column. A separable Gaussian stencil removes splat noise; the top-down running optical
-// depth gives each cell its shadow from an overhead key light at no extra raymarch cost.
+// One invocation per vertical column. A seven-point weighted stencil softens
+// splat noise; it is an axial approximation, not a full separable Gaussian blur.
+// A running top-down optical depth gives each cell an overhead shadow, avoiding
+// a second light raymarch at every camera-ray sample. This trades general light
+// directions for an O(VX*VY*VZ) precomputation shared by all rendered pixels.
 @compute @workgroup_size(64)
 fn lightColumns(@builtin(global_invocation_id) gid: vec3u) {
   if (gid.x >= VX * VZ) { return; }
@@ -68,7 +88,7 @@ fn lightColumns(@builtin(global_invocation_id) gid: vec3u) {
   var depth = 0.0;
   for (var y = i32(VY) - 1; y >= 0; y--) {
     let c = vec3i(x, y, z);
-    // Seven coalesced reads instead of a 27-tap cubic stencil. Trilinear sampling
+    // Seven nearby reads instead of a 27-tap cubic stencil. Trilinear sampling
     // supplies the remaining smoothing; this volume now carries broad illumination only.
     let sum = raw(c) * 0.4 + 0.1 * (raw(c+vec3i(1,0,0)) + raw(c-vec3i(1,0,0))
       + raw(c+vec3i(0,1,0)) + raw(c-vec3i(0,1,0))
@@ -77,6 +97,8 @@ fn lightColumns(@builtin(global_invocation_id) gid: vec3u) {
     let n = sum / FIXED * volume.shading.x;
     let rho = n / (1.0 + n * 0.25);
     let halfDepth = rho * extinction * cellHeight * 0.5;
+    // Integrate half a cell before storing and half afterwards, so the stored
+    // attenuation represents the cell midpoint instead of either face.
     depth += halfDepth;
     // g: single-scatter shadow; b: softer multiple-scatter approximation that lets light leak deeper.
     textureStore(lightOut, c, vec4f(rho, exp(-depth), exp(-depth * 0.25), 0.0));
@@ -85,6 +107,8 @@ fn lightColumns(@builtin(global_invocation_id) gid: vec3u) {
 }
 
 // One-time tileable detail noise: smoothed lattice values, two independent channels.
+// The 32-cube repeats in all axes. Baking its expensive 27-neighbour smoothing
+// once turns procedural detail in the raymarch into two hardware-filtered fetches.
 fn lattice(c: vec3u, salt: u32) -> f32 { return rnd(cellIndex(c % vec3u(32u)) + salt * 40009u, salt); }
 @compute @workgroup_size(64)
 fn buildNoise(@builtin(global_invocation_id) gid: vec3u) {
@@ -142,6 +166,9 @@ fn spectralLight(xy: vec2f, response: f32) -> vec4f {
 
 // Same pinhole camera as render.wgsl: screen = xy / (1 - z / distance), eye on +z.
 @fragment fn rayFragment(input: RayOutput) -> @location(0) vec4f {
+  // Slab intersection: intersect the ray with each pair of box planes, then take
+  // the latest entry and earliest exit. Only march inside the finite smoke box;
+  // rays that miss it return immediately instead of sampling empty space.
   let eye = vec3f(0.0, 0.0, volume.box.w);
   let dir = normalize(vec3f(input.screen, -volume.box.w));
   let inv = 1.0 / dir;
@@ -170,6 +197,10 @@ fn spectralLight(xy: vec2f, response: f32) -> vec4f {
     let s = density(q, detail);
     if (s.x > 0.0005) {
       let sigma = s.x * extinction;
+      // Beer-Lambert attenuation: a segment of length dt transmits exp(-sigma*dt).
+      // Front-to-back accumulation weights each segment by the light still able
+      // to reach the viewer. RGB is already weighted by opacity (premultiplied),
+      // so the compositor must not multiply it by output alpha a second time.
       let absorbed = 1.0 - exp(-sigma * dt);
       // Lower smoke receives less sky. Weighting by the absorbed fraction keeps brightness
       // independent of the step count.
@@ -182,6 +213,9 @@ fn spectralLight(xy: vec2f, response: f32) -> vec4f {
       let neutral = 0.82 * (1.0 - lampCoverage * 0.88) * (ambient * sky + key * s.y);
       color += transmittance * absorbed * (neutral + musicLight * 8.0);
       transmittance *= 1.0 - absorbed;
+      // Once less than 1% is transmitted, later samples have little influence.
+      // Early termination saves texture/lighting work in dense rays; very bright
+      // hidden emitters can still be underestimated by this approximation.
       if (transmittance < 0.01) { break; }
     }
   }

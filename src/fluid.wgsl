@@ -2,6 +2,28 @@
 // Method reference: SebLague/Smoke-Simulation (Unity); no source/assets copied.
 // RG velocity stores the left/bottom face speeds of each cell; smoke RGB is
 // advected dye concentration, A is excess temperature. All distances are world units.
+//
+// Read alongside FluidSmoke in fluid.js, which assembles this module with
+// common-shader.wgsl and assigns textures to the bindings below for each pass:
+//   advectVelocity -> curl -> confine -> divergence -> pressure (32 iterations)
+//   -> project -> dyeForward -> dyeBackward -> dyeCorrect -> advectLight.
+// Fluid-ring mode also runs advectDetail before drawing fluid and tracer streaks.
+//
+// This is a MAC (marker-and-cell) arrangement: pressure/dye live at cell centres,
+// while the x/y velocity components live on different cell faces. Measuring net
+// flow through those faces lets projection remove unwanted compression.
+// field, auxiliary and original are pass-dependent inputs, not fixed datasets.
+// Read/write textures are kept separate; fluid.js swaps ("ping-pongs") them so
+// each dispatch reads a completed snapshot rather than its neighbours' writes.
+//
+// Performance: velocity/pressure are at most 512x192; dye and light have four
+// times the width and height. Each pressure iteration therefore visits 1/16 as
+// many cells as it would at dye resolution. Fine dye edges
+// and native-resolution tracers supply detail, but cannot add finer fluid motion.
+// Each 8x8 compute group covers a tile of 64 cells. Dispatches round up, so every
+// entry point checks image bounds; these kernels use texture reads, not a shared
+// workgroup-memory tile. textureLoad reads exact cells for difference stencils;
+// textureSampleLevel uses linear interpolation for transport between cells.
 @group(0) @binding(0) var<uniform> params: Parameters;
 @group(0) @binding(1) var field: texture_2d<f32>;
 @group(0) @binding(2) var velocity: texture_2d<f32>;
@@ -18,12 +40,17 @@ fn worldAt(uv: vec2f) -> vec2f { return (uv - .5) * worldSize(); }
 fn bounded(c: vec2i, size: vec2u) -> vec2i { return clamp(c, vec2i(0), vec2i(size)-1); }
 fn value(c: vec2i) -> vec4f { return textureLoad(field, bounded(c, textureDimensions(field)), 0); }
 fn velAt(q: vec2f) -> vec2f {
+  // The texture packs staggered components into RG at one texel address. Each
+  // component therefore needs its own half-cell offset when sampled at q.
   let uv = uvOf(q);
   let halfCell = .5 / vec2f(textureDimensions(velocity));
   return vec2f(textureSampleLevel(velocity, linearSampler, uv+vec2f(halfCell.x,0),0).x,
     textureSampleLevel(velocity, linearSampler, uv+vec2f(0,halfCell.y),0).y);
 }
 fn rewind(q: vec2f, dt: f32) -> vec2f {
+  // Semi-Lagrangian transport asks "where did material at q come from?" and
+  // samples there. This midpoint (RK2) backtrace samples velocity halfway along
+  // the estimated trip, improving curved trajectories over a single Euler step.
   return q - velAt(q - velAt(q) * dt * .5) * dt;
 }
 fn ringMode() -> bool { return params.simulation.x>6.5; }
@@ -51,6 +78,8 @@ fn sectorLaunch(i:u32)->f32 {
   return sectorStrength(i)*(0.55+response*.65)*(1.0+ringAttack(i)*bassWeight*2.2)*bassWeight;
 }
 fn source(q: vec2f) -> vec4f {
+  // Analytic Gaussian nozzles produce RGB dye and heat without an emitter texture.
+  // These are rates: callers multiply by dt when adding material or light.
   var s=vec4f(0);
   if(ringMode()){
     for(var i=0u;i<9u;i++){
@@ -118,6 +147,9 @@ fn nozzleVelocity(q:vec2f) -> vec2f {
   return force;
 }
 
+// First carry each face velocity through the old flow, then add buoyancy, jets
+// and input forces. Hot smoke rises and concentration adds a small downward load.
+// The resulting velocity can compress/expand locally; projection fixes that later.
 @compute @workgroup_size(8,8) fn advectVelocity(@builtin(global_invocation_id) id: vec3u) {
   let size=textureDimensions(result); if(any(id.xy>=size)){return;}
   let c=vec2i(id.xy); let h=worldSize()/vec2f(size);
@@ -153,6 +185,8 @@ fn nozzleVelocity(q:vec2f) -> vec2f {
   if(id.y==size.y-1u){v.y=max(v.y,0.0);}
   textureStore(result,c,vec4f(v,0,0));
 }
+// In 2D, curl is a scalar: dv_y/dx - dv_x/dy measures local rotation and its sign.
+// Central differences approximate these derivatives from neighbouring texels.
 @compute @workgroup_size(8,8) fn curl(@builtin(global_invocation_id) id: vec3u) {
   let size=textureDimensions(scalarResult); if(any(id.xy>=size)){return;}
   let c=vec2i(id.xy); let h=worldSize()/vec2f(size);
@@ -160,6 +194,10 @@ fn nozzleVelocity(q:vec2f) -> vec2f {
        -(value(c+vec2i(0,1)).x-value(c-vec2i(0,1)).x)/(2*h.y);
   textureStore(scalarResult,c,vec4f(w,0,0,0));
 }
+// Repeated interpolation damps small eddies. Vorticity confinement finds the
+// direction of increasing |curl| and applies a perpendicular, signed force to
+// reinforce them. Scaling by cell size limits the correction as the grid refines;
+// this is a visual compensation for numerical diffusion, not extra resolution.
 @compute @workgroup_size(8,8) fn confine(@builtin(global_invocation_id) id: vec3u) {
   let size=textureDimensions(result); if(any(id.xy>=size)){return;}
   let c=vec2i(id.xy); let h=worldSize()/vec2f(size);
@@ -173,6 +211,8 @@ fn nozzleVelocity(q:vec2f) -> vec2f {
   if(!ringMode() && id.y==0u){v.y=0;}
   textureStore(result,c,vec4f(v,0,0));
 }
+// Outgoing minus incoming face velocity, divided by cell size, measures local
+// expansion. The pressure solve seeks a gradient whose divergence cancels it.
 @compute @workgroup_size(8,8) fn divergence(@builtin(global_invocation_id) id: vec3u) {
   let size=textureDimensions(scalarResult); if(any(id.xy>=size)){return;}
   let c=vec2i(id.xy); let h=worldSize()/vec2f(size);
@@ -180,6 +220,13 @@ fn nozzleVelocity(q:vec2f) -> vec2f {
   let d=(value(c+vec2i(1,0)).x-v.x)/h.x+(value(c+vec2i(0,1)).y-v.y)/h.y;
   textureStore(scalarResult,c,vec4f(d,0,0,0));
 }
+// One Jacobi iteration of Laplacian(p) = divergence(v). field is the previous
+// pressure estimate, auxiliary holds divergence, and scalarResult gets the next
+// estimate. The 1/h^2 weights account for different x/y cell sizes on wide views.
+// Here p is a velocity-correction potential with timestep/density factors absorbed.
+// fluid.js runs 32 iterations and retains pressure between frames as a warm start:
+// fixed work gives approximate incompressibility, not an exactly converged solve.
+// Zero pressure on open edges lets smoke leave; clamped reads handle other edges.
 @compute @workgroup_size(8,8) fn pressure(@builtin(global_invocation_id) id: vec3u) {
   let size=textureDimensions(scalarResult); if(any(id.xy>=size)){return;}
   let c=vec2i(id.xy); let h=worldSize()/vec2f(size); let a=1.0/(h*h);
@@ -189,6 +236,9 @@ fn nozzleVelocity(q:vec2f) -> vec2f {
   if(id.y==size.y-1u || (ringMode() && (id.x==0u || id.x==size.x-1u || id.y==0u))){p=0.0;}
   textureStore(scalarResult,c,vec4f(p,0,0,0));
 }
+// Subtract the pressure gradient at each face to reduce divergence. Some artistic
+// interactions are deliberately applied afterwards and can reintroduce divergence;
+// this preserves the visible suction/push behaviour rather than strict fluid physics.
 @compute @workgroup_size(8,8) fn project(@builtin(global_invocation_id) id: vec3u) {
   let size=textureDimensions(result); if(any(id.xy>=size)){return;}
   let c=vec2i(id.xy); let h=worldSize()/vec2f(size); let p=value(c).x;
@@ -216,10 +266,16 @@ fn nozzleVelocity(q:vec2f) -> vec2f {
   textureStore(result,c,vec4f(clamp(v,vec2f(-3),vec2f(3)),0,0));
 }
 fn dye(q: vec2f) -> vec4f {
+  // Returning zero outside the domain prevents the clamp sampler from dragging
+  // the last edge texel indefinitely into backtraces that leave the simulation.
   let uv=uvOf(q);
   if(any(uv<vec2f(0))||any(uv>vec2f(1))){return vec4f(0);}
   return textureSampleLevel(field,linearSampler,uv,0);
 }
+// MacCormack transport uses three passes to counter interpolation blur:
+// forward moves old dye through dt; backward transports that result through -dt;
+// correct adds half the difference between old dye and the round-trip result.
+// The extra reads/passes preserve wisps better than simple forward advection.
 @compute @workgroup_size(8,8) fn dyeForward(@builtin(global_invocation_id) id: vec3u) {
   let size=textureDimensions(result); if(any(id.xy>=size)){return;}
   let q=worldAt((vec2f(id.xy)+.5)/vec2f(size));
@@ -231,6 +287,10 @@ fn dye(q: vec2f) -> vec4f {
   textureStore(result,vec2i(id.xy),dye(rewind(q,-params.clock.y)));
 }
 @compute @workgroup_size(8,8) fn dyeCorrect(@builtin(global_invocation_id) id: vec3u) {
+  // Bindings here: field = old dye, auxiliary = forward dye, original = backward
+  // dye (despite its name). The four old samples around the departure point set
+  // a local min/max: clamping to that range stops correction from inventing bright
+  // halos or negative concentrations at sharp edges. Heat then cools faster than dye.
   let size=textureDimensions(result); if(any(id.xy>=size)){return;}
   let c=vec2i(id.xy); let q=worldAt((vec2f(id.xy)+.5)/vec2f(size));
   let pos=uvOf(rewind(q,params.clock.y))*vec2f(size)-.5; let cell=vec2i(floor(pos));
@@ -247,6 +307,8 @@ fn dye(q: vec2f) -> vec4f {
 }
 // Emissive colour is a separate transported quantity. It stays attached to the
 // moving dye after the note ends; small diffusion spills light into nearby smoke.
+// Light uses the same midpoint backtrace but skips MacCormack correction and adds
+// four-neighbour diffusion: broad glow can be smooth while dye carries sharp edges.
 @compute @workgroup_size(8,8) fn advectLight(@builtin(global_invocation_id) id: vec3u) {
   let size=textureDimensions(result);if(any(id.xy>=size)){return;}
   let uv=(vec2f(id.xy)+.5)/vec2f(size);let q=worldAt(uv);
@@ -261,6 +323,9 @@ fn dye(q: vec2f) -> vec4f {
 }
 // Native-resolution tracers follow the pressure-projected fluid field. They add
 // fine grain and folded filaments without increasing the pressure grid cost.
+// The 262144 cap must match fluid.js. Each tracer samples the existing flow with
+// a midpoint step and never pushes back on it: this detail is cheap relative to
+// enlarging a grid that would need all 32 pressure iterations at higher resolution.
 @compute @workgroup_size(256) fn advectDetail(@builtin(global_invocation_id) id:vec3u){
   if(id.x>=min(u32(params.clock.w),262144u)){return;}
   var p=detailParticles[id.x];let dt=params.clock.y;let band=id.x%9u;
@@ -283,11 +348,18 @@ fn dye(q: vec2f) -> vec4f {
   detailParticles[id.x]=p;
 }
 struct FluidVertex { @builtin(position) position: vec4f, @location(0) uv: vec2f }
+// A generated oversized triangle covers the viewport without a vertex buffer.
+// Unlike post-shader.wgsl, UV y is not flipped: this solver maps increasing texture
+// y to increasing world y. Keep that convention consistent with worldAt/uvOf.
 @vertex fn fluidVertex(@builtin(vertex_index) id: u32) -> FluidVertex {
   let p=vec2f(f32((id<<1u)&2u),f32(id&2u));
   var o:FluidVertex;o.position=vec4f(p*2.0-1.0,0,1);o.uv=p;return o;
 }
 @fragment fn fluidFragment(input: FluidVertex) -> @location(0) vec4f {
+  // A 2D shading approximation: 1-exp(-density*scale) turns concentration into
+  // opacity, and one offset density sample suggests directional edge lighting.
+  // This avoids a volume raymarch for the fluid modes. Output is opaque HDR RGB;
+  // the local alpha variable shapes brightness rather than framebuffer blending.
   let s=textureSampleLevel(field,linearSampler,input.uv,0);
   let concentration=max(s.r,max(s.g,s.b));
   let h=1.0/vec2f(textureDimensions(field));

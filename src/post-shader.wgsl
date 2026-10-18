@@ -1,12 +1,26 @@
+// Screen-space passes, assembled with common-shader.wgsl by gpu.js. A fragment
+// invocation processes one output pixel. tex0/tex1 change roles per pipeline:
+// fade: old scene; down/blur: scene or bloom; volume: particles + smoke;
+// composite: final HDR scene + blurred bloom. See gpu.js bind groups for wiring.
+//
+// Typical order: fade old scene -> add particle streaks -> downsample highlights
+// -> horizontal/vertical blur pairs -> optional volume mix -> final composite.
+// Fluid modes draw a new scene instead of using the trail history. Scene history
+// and blur textures ping-pong: each pass reads one texture and writes another.
+// Intermediate light stays in rgba16float; tone mapping belongs at the end so
+// bright highlights retain the energy needed for bloom.
 @group(0) @binding(0) var samp: sampler;
 @group(0) @binding(1) var tex0: texture_2d<f32>;
 @group(0) @binding(2) var tex1: texture_2d<f32>;
 @group(0) @binding(3) var<uniform> params: Parameters;
 @group(0) @binding(4) var<uniform> blurDir: vec4f; // direction in texels
-@group(0) @binding(5) var<uniform> volumeMix: vec4f; // particle gain behind smoke, transmittance exponent
+@group(0) @binding(5) var<uniform> volumeMix: vec4f; // particle gain, transmittance exponent, smoke gain, unused
 
 struct FullscreenOutput { @builtin(position) position: vec4f, @location(0) uv: vec2f }
 @vertex fn fullscreenVertex(@builtin(vertex_index) vertexId: u32) -> FullscreenOutput {
+  // Three generated vertices form an oversized triangle covering the viewport.
+  // This needs no vertex buffer and avoids a two-triangle quad's internal seam.
+  // Clip-space y points up; flipping UV y makes the top sample the texture's top.
   let xy = vec2f(f32((vertexId << 1u) & 2u), f32(vertexId & 2u));
   var output: FullscreenOutput;
   output.position = vec4f(xy * 2.0 - 1.0, 0.0, 1.0);
@@ -22,12 +36,19 @@ fn smokeContrast(c: vec3f) -> vec3f {
   return c * smoothstep(0.012, 0.085, peak) * 1.18;
 }
 
-// Trail persistence: the previous frame fades with a slight diffusion so streaks leave soft wakes.
+// Trail persistence: copy the previous frame with exponential fading, then add
+// new streaks in the same render pass. gpu.js computes decay from real elapsed
+// time, so trails have a time-based lifetime rather than a fixed frame count.
+// This is one filtered sample, not an explicit multi-tap diffusion/blur pass.
 @fragment fn fadeFragment(input: FullscreenOutput) -> @location(0) vec4f {
   return textureSampleLevel(tex0, samp, input.uv, 0.0) * params.extra.y;
 }
 
-// Quarter-resolution bright pass: four bilinear taps cover the 4x4 source block exactly.
+// Quarter width and height mean roughly 1/16 as many bloom pixels. For an exact
+// 4:1 reduction, these four bilinear taps cover four 2x2 source regions; each
+// fetch uses hardware interpolation instead of four explicit texture loads.
+// Thresholding the filtered colours is a cheap highlight approximation, not
+// identical to thresholding all 16 source pixels separately before averaging.
 fn bright(c: vec3f) -> vec3f { let clean = smokeContrast(c); return clean * smoothstep(0.12, 0.8, luminance(clean)); }
 @fragment fn downFragment(input: FullscreenOutput) -> @location(0) vec4f {
   let texel = 1.0 / vec2f(textureDimensions(tex0));
@@ -38,7 +59,11 @@ fn bright(c: vec3f) -> vec3f { let clean = smokeContrast(c); return clean * smoo
   return vec4f(sum * 0.25, 1.0);
 }
 
-// Separable 9-tap gaussian expressed as 5 bilinear taps.
+// A Gaussian separates into horizontal and vertical 1D filters. Two 9-tap
+// passes replace an 81-tap 2D kernel. Each off-centre pair of neighbouring taps
+// is combined with a weighted fractional offset, so linear sampling reduces
+// each pass to five fetches. gpu.js runs two axis pairs, widening the second.
+// The weights sum to approximately 1, preserving brightness through the blur.
 @fragment fn blurFragment(input: FullscreenOutput) -> @location(0) vec4f {
   let stride = blurDir.xy / vec2f(textureDimensions(tex0));
   var c = textureSampleLevel(tex0, samp, input.uv, 0.0).rgb * 0.2270270270;
@@ -47,8 +72,11 @@ fn bright(c: vec3f) -> vec3f { let clean = smokeContrast(c); return clean * smoo
   return vec4f(c, 1.0);
 }
 
-// Spectral smoke: bilinear upscale of the half-resolution raymarch (premultiplied colour, opacity).
+// Spectral smoke: bilinear upscale of the bounded low-resolution raymarch (premultiplied colour, opacity).
 // Particles sit inside the medium rather than behind it, so they see a partial transmittance.
+// Raising transmittance to an exponent below 1 preserves more filament light.
+// This is an artistic approximation of depth placement, without sorting or
+// storing per-particle depth in the volume. Smoke RGB is already premultiplied.
 @fragment fn volumeFragment(input: FullscreenOutput) -> @location(0) vec4f {
   let scene = textureSampleLevel(tex0, samp, input.uv, 0.0).rgb;
   let smoke = textureSampleLevel(tex1, samp, input.uv, 0.0);
@@ -82,6 +110,9 @@ fn bright(c: vec3f) -> vec3f { let clean = smokeContrast(c); return clean * smoo
   color = vec3f(1.0) - exp(-color * 1.25);
   let centered = input.uv - vec2f(0.5);
   let vignette = 1.0 - dot(centered, centered) * 0.7;
+  // Sub-8-bit noise decorrelates rounding across pixels, hiding smooth-gradient
+  // banding when HDR is finally written to the display target. It is spatially
+  // stable (no time input), so the dither does not flicker each frame.
   let dither = (fract(52.9829189 * fract(dot(input.position.xy, vec2f(0.06711056, 0.00583715)))) - 0.5) / 255.0;
   let smokeMode = (params.simulation.x > 3.5 && params.simulation.x < 5.5) || params.simulation.x > 6.5;
   let background = select(vec3f(0.004, 0.006, 0.016), vec3f(0.0), smokeMode);

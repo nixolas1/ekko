@@ -1,5 +1,20 @@
+// Particle simulation, assembled with common-shader.wgsl before this file and
+// reference-simulation.wgsl after it. gpu.js schedules: clear density buffer ->
+// binParticles -> simulate -> render. These separate compute passes ensure all
+// density deposits are finished before any simulation invocation reads them.
+// A workgroup barrier alone cannot synchronise all groups in a whole dispatch.
+//
+// Each invocation updates one particle in place; it never reads another
+// particle's changing record. Interactions use the completed density snapshot,
+// so we do not need a second full particle buffer for the simulation.
+// Workgroups contain 256 invocations, with ceil(count/256) groups on the CPU.
+// The id guard handles the unused lanes of the final group. This is a batching
+// choice, not a claim that 256 is the fastest size on every GPU.
 @group(0) @binding(0) var<storage, read_write> particles: array<Particle>;
 @group(0) @binding(1) var<uniform> params: Parameters;
+// Only mass is used, but the record stride is 16 bytes to match gpu.js allocation.
+// Atomics prevent simultaneous deposits from losing updates. Dense piles can
+// still contend on the same nodes; atomics make them correct, not free.
 struct DensityCell { mass: atomic<u32>, unused: array<u32, 3> }
 @group(0) @binding(2) var<storage, read_write> density: array<DensityCell>;
 const GRID = 128u;
@@ -12,6 +27,9 @@ const SOUND_SPEED2 = 0.06;
 // Any grid still slightly favours some spots inside a cell (noise is weaker between nodes), so the
 // nodes move by a fresh sub-cell offset every frame, shared by binning and separation; the preference
 // then averages out instead of sorting particles into a lattice. Edge particles fold onto border nodes.
+// Binning and fixed-size neighbourhood reads cost O(n) for n particles, plus a
+// fixed grid clear. This approximates crowd pressure; it is not exact pairwise
+// collision detection and cannot resolve interactions below the grid scale.
 fn densityCoordinate(q: vec2f) -> vec2f {
   // Low-discrepancy (R2) offsets cover the cell evenly within a few frames, unlike random ones;
   // exact u32 wrap-around keeps them precise however long the session runs.
@@ -75,6 +93,9 @@ fn separation(q: vec2f, id: u32) -> vec2f {
 }
 
 fn tri(x: f32) -> f32 { return abs(fract(x) - 0.5) * 4.0 - 1.0; }
+// The shape functions below are procedural rest positions. A strand index k
+// selects a curve and u selects a point along it. Regenerating positions from
+// these small formulas avoids storing or uploading animated path geometry.
 fn rot(p: vec2f, a: f32) -> vec2f {
   let c = cos(a);
   let s = sin(a);
@@ -161,6 +182,9 @@ fn flow(q: vec3f, t: f32) -> vec3f {
 
 // Each wave is the curl of a vector potential: cross(k, a) * cos(dot(k, q)).
 // Shared spatial phases keep neighboring particles in coherent folds; no per-frame jitter.
+// An analytic curl supplies swirling motion without sampling a 3D noise field
+// repeatedly to estimate derivatives. Its divergence is zero mathematically;
+// the full motion also includes artistic forces and is not a pressure solve.
 fn smokeCurl(q: vec3f, t: f32) -> vec3f {
   let k1 = vec3f(2.1, 3.7, 1.3);
   let k2 = vec3f(-3.3, 1.5, 2.7);
@@ -183,6 +207,9 @@ fn spectralLevelAt(radial: vec2f) -> f32 {
 }
 
 fn newSmoke(id: u32, mode: f32, warm: bool) -> Particle {
+  // Fixed pool lifecycle: extra = (source parameter, age, unused, lifetime).
+  // Negative age means waiting to emit. Recycling the same slot avoids a GPU
+  // allocator, a CPU birth list, and growing buffers as smoke is produced.
   let key = id ^ pcg(u32(params.clock.x * 71.0));
   let ring = mode > 2.5;
   let life = 4.5 + rnd(id, 35u) * 3.0;
@@ -230,6 +257,8 @@ fn simulateSmoke(id: u32, old: Particle) -> Particle {
     let attack=spectralAttack(id % 9u);
     let strength=smoothstep(.06,.85,band);
     // A dim baseline trickle keeps silent sectors as faint grey smoke, so the ring stays whole.
+    // 1-exp(-rate*dt) is the probability of an event during this time interval.
+    // It makes the emission rate less dependent on how many frames are rendered.
     let chance=1.0-exp(-(0.07+strength*strength*strength*5.0)*dt);
     if (rnd(id ^ pcg(u32(t*1000.0)),63u) >= chance) { return p; }
     p.extra.y=0.0;
@@ -322,6 +351,8 @@ fn simulate(@builtin(global_invocation_id) gid: vec3u) {
   let count = u32(params.clock.w);
   if (id >= count) { return; }
   var p = particles[id];
+  // Mode is uniform across the dispatch, so all active invocations take the
+  // same major branch. Fluid modes bypass this entry point in gpu.js entirely.
   if (params.simulation.x > 4.5) { particles[id] = simulateReference(id, p); return; }
   if (params.simulation.x > 1.5) { particles[id] = simulateSmoke(id, p); return; }
   let t = params.clock.x;
@@ -336,6 +367,9 @@ fn simulate(@builtin(global_invocation_id) gid: vec3u) {
   let persistent = params.simulation.x > 0.5;
 
   // Which strand and where along it; stratified so strands stay evenly lit at every count.
+  // Modulo distributes successive ids across strands; division assigns each a
+  // small interval along its strand. Jitter within that interval hides regular
+  // spacing without the large gaps of fully random sampling.
   let strands = strandCount(effect);
   let k = id % strands;
   let per = f32((count + strands - 1u) / strands);
@@ -368,6 +402,8 @@ fn simulate(@builtin(global_invocation_id) gid: vec3u) {
   }
 
   // Every burst drained this frame is applied, in order, once per particle.
+  // state.x remembers the last consumed serial. This prevents a persistent
+  // event value in the uniform buffer from kicking the same particle repeatedly.
   let nb = min(u32(params.extra.x), 8u);
   for (var i = 0u; i < nb; i++) {
     let b = params.bursts[i];
@@ -399,6 +435,8 @@ fn simulate(@builtin(global_invocation_id) gid: vec3u) {
   let nf = min(u32(params.display.w), 32u);
 
   // Hand and body points claim a share of a reserved pool and emit it as a stream along their motion.
+  // Only a stable 22% subset enters this path. Dividing the emission probability
+  // by that subset's size keeps the expected birth rate similar as count changes.
   if (!persistent && dt > 0.0 && nf > 0u && rnd(id, 14u) < 0.22) {
     let key = id ^ pcg(u32(t * 1000.0));
     let x = rnd(key, 15u);
@@ -440,7 +478,9 @@ fn simulate(@builtin(global_invocation_id) gid: vec3u) {
   }
 
   // Each force point relaxes nearby velocities toward a swirl round it that also follows its motion.
-  // Relaxation is unconditionally stable, so points stay independent at any strength.
+  // For a fixed target, 1-exp(-rate*dt) stays in [0,1], so this velocity blend
+  // cannot overshoot it. This does not guarantee stability of the entire solver:
+  // springs, moving targets and position integration still need bounded steps.
   for (var j = 0u; j < nf; j++) {
     let f = params.forces[j];
     if (abs(f.z) < 0.001) { continue; }

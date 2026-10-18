@@ -1,8 +1,201 @@
 # EKKO
 
-A music-reactive WebGPU particle visualizer controlled with your hands. Smoke, luminous ribbons, spectral rings, and folded vortices respond to audio and hand gestures.
+**Sound into smoke. Your hands into motion.**
+
+EKKO is an interactive music visualizer built with WebGPU. Bass launches jets of smoke, high notes light up fine ribbons, and your hands gather, twist and scatter the scene. It runs in the browser, with fluid simulation, millions of particles, and glowing light calculated on your GPU.
+
+![Rainbow smoke ribbons glowing as they rise and fold](docs/images/smoke-light.jpg)
+
+*Smoke light · Original — a million particles turning the audio spectrum into luminous, folded ribbons.*
+
+[Guided tour](#take-the-guided-tour) · [Get started](#run-locally) · [Visual modes](#choose-your-scene) · [Hand controls](#shape-it-with-your-hands) · [Music](#let-the-music-drive-it) · [How WebGPU works](#how-webgpu-powers-ekko) · [Developer guide](#explore-the-code)
+
+## Take the guided tour
+
+Choose **Take the tour** in the header for a three-minute journey through all nine modes. An original instrumental loop, *First light*, plays through the same audio analyser as your own music. If you already have a song loaded or a live input connected, the tour uses that source instead. No audio library download is needed for the built-in score.
+
+Animated hand skeletons demonstrate Wand, Vortex, Gather, Push and Shockwave. A simulated cursor demonstrates hover, click-and-hold, and Command-click gathering. The drawings and the simulation share the same positions: you see the controls that are actually affecting the smoke and particles. Camera tracking does not influence the tour.
+
+- **Back / Next** or the nine chapter markers jump between scenes.
+- **Pause / Resume** freezes the demonstration and pauses file playback. Live audio keeps playing in its source. Switching away from the tab pauses the tour.
+- **Mute music** silences file playback while keeping its spectrum connected to the visuals.
+- **Repeat tour** loops the chapters for an unattended showcase.
+- **Try this mode** hands the current scene and its visual tuning over to you.
+- **Exit tour** or **Escape** restores your previous mode, tuning, particle settings and file playback position/state. Tour settings are temporary until you choose **Try this mode**.
+
+The tour uses the real WebGPU renderer, with automatic particle quality adjustment. Its controls are simulated and labelled; it cannot replace practising with your own hands or mouse. You can run it without allowing camera access.
+
+![Guided tour demonstrating the Wand gesture in rainbow smoke](docs/images/guided-tour.jpg)
+
+*The tour uses live audio-reactive rendering; the labelled hand shows the force moving the ribbons.*
+
+## Try this first
+
+1. Start the app and choose **Fluid ring** or **Smoke light · Original**.
+2. Pick **Audio file** to open a song from your device, or choose a song from the library if its audio files are installed.
+3. Select **Rainbow**, turn up **Audio response**, and press **F** for fullscreen.
+4. Move the mouse through the scene. Hold a click to push; hold **Command-click** to gather.
+5. Allow camera access to use your hands: make a fist to gather, then open your palm to release the light.
+
+The scene also animates without audio. Opening a saved link or reloading keeps music paused; press **Space** when you are ready.
+
+## Choose your scene
+
+| Mode | What you see and control |
+| --- | --- |
+| **Fluid ring** | Nine smoke jets radiating from a circle. Bass begins at the upper left; higher frequencies continue clockwise. Note attacks kick the jets outward, carrying light into twisting filaments. |
+| **Smoke light · Lasting glow** | Continuous smoke ribbons that catch light when a note starts. Each illuminated patch travels with the smoke and slowly fades. |
+| **Smoke light · Original** | Rising, folded sheets of luminous particles. Seven frequency bands feed the emitter; the music can also flash across smoke already in the air. |
+| **Fluid smoke** | Buoyant smoke you can stir. Bass hits fire upward on the left, while higher notes feed the lanes to the right. |
+| **Fire & ice** | Two rolling vortex bundles, warm and cool in the matching palette. Streams curl, fold and meet as the music and your hands disturb them. |
+| **Spectral smoke** | A full-circle spectrum of fine filaments inside softly shaded volumetric smoke. Nine frequency sectors control emission and lighting. |
+| **Particle ring** | Outward streams of particles that accelerate with bass intensity. Pull and push the ring with your hands or mouse. |
+| **Airbender** | A persistent cloud of particles. Gather them into an orbit, drag them across the screen, then send them flying. |
+| **Light shapes** | Music-reactive geometry: Wave wreath, Light ribbons, Wave field and Angular trails. Hand forces disturb the shapes as they move. |
+
+![Warm gold and cool blue smoke folding into two sweeping vortices in EKKO](docs/images/fire-and-ice.jpg)
+
+*Fire & ice — two rolling vortex fields carrying warm and cool streams into sweeping folds.*
+
+| Spectral smoke | Fluid ring |
+| --- | --- |
+| ![Multicoloured filaments spreading through a softly shaded smoke ring](docs/images/spectral-smoke.jpg) | ![Nine coloured fluid jets curling outward from a central ring](docs/images/fluid-ring.jpg) |
+| Fine particles draw the edges; a coarse volume supplies soft light and depth. | A fluid velocity field carries both smoke and fine particle tracers. |
+
+![Bright rainbow fluid smoke rising into curls and layered folds](docs/images/fluid-smoke.jpg)
+
+*Fluid smoke — heat, colour and transported light moving through a pressure-projected velocity field.*
+
+These are screenshots of the running app, captured at 1920 × 1080 with music playing and controls hidden. The gallery uses higher particle counts and boosted glow/audio response; it shows live output, not prerendered artwork. See [capture settings](docs/images/captures.json) for the selected frames.
+
+## Shape it with your hands
+
+Camera tracking turns hand landmarks into forces in the simulation. The preview mirrors your movement, and **Show hands** adds a skeleton and gesture labels over the scene, including in fullscreen.
+
+| Gesture | Action |
+| --- | --- |
+| Raise your index finger | **Wand:** gather light into a small moving core. |
+| Raise index and middle fingers | **Vortex:** stir an orbit. Spread the fingertips to widen it. |
+| Add your ring finger | **Shockwave:** release a burst. |
+| Close your hand | **Gather:** pull particles into orbit. |
+| Open your palm | **Push:** repel the scene. Opening a closed hand also triggers a burst. |
+
+Hold finger gestures briefly to switch powers; thumbs are ignored. **Hand force** adjusts pull and push together, with fine control at low strengths. Choose tracking for **2, 4 or 8 hands** to let more people join in; two hands has the lowest tracking load.
+
+The app attempts to start the camera after WebGPU initialises, subject to browser permission. Use **Stop camera / Enable camera** in Movement to control it. The **Show hands** checkbox only controls the overlay. You can use the mouse and music without a camera.
+
+Hand detection runs locally in a MediaPipe worker, with smoothing and bounded prediction to keep movement responsive between tracking results. Camera frames are neither uploaded nor saved by the app.
+
+## Let the music drive it
+
+EKKO measures the audio spectrum and sudden rises in energy. Different modes use bass/mid/treble levels, seven emission bands, or nine independently measured ring bands. A kick can launch smoke while a higher note illuminates a different part of the scene.
+
+**Audio response** changes visual sensitivity and jet strength without changing playback volume. **Glow** changes the spread of light. In Lasting glow and the fluid modes, emitted light moves with the smoke after the note ends.
+
+| Source | How to use it |
+| --- | --- |
+| **Library** | Select an installed song to start it. The song selection and playback position are remembered; a reload always restores playback paused. |
+| **Audio file** | Choose a local audio file. It is analysed and played on your device; the last selected file may be cached locally for the next visit. |
+| **Microphone** | Let live sound drive the scene. Microphone input is analysed without being played back or recorded. |
+| **Tab audio** | Choose **Share tab**, select a browser tab playing music or video, and enable **Share tab audio** in the browser picker. Playback stays in the original tab. |
+| **YouTube** | Paste a single-video link and select **Load audio**. Known library links reuse the hosted files; other links require the optional import API described below. |
+
+Tab audio depends on browser and sharing-surface support; the app's UI guides desktop Chrome/Edge users through the picker. **Stop sharing** disconnects EKKO without pausing the original tab. Refreshing requires sharing again. The browser also supplies a display track, which EKKO does not render, record or upload.
+
+## Make it your own
+
+<details>
+<summary>See the controls alongside the live scene</summary>
+
+![EKKO playing music with visual-mode cards, audio controls and palettes visible](docs/images/controls.jpg)
+
+</details>
+
+- **Seven palettes:** Aurora, Ember, Ocean, Rainbow, Neon, Silver, and Fire & ice.
+- **Per-mode settings:** speed and glow, plus turbulence, emission or particle visibility where supported. Each mode remembers its own values. Particle visibility brightens individual points independently of bloom.
+- **Fullscreen and hidden controls:** fill the screen with the scene, then move to the right edge to reveal the settings drawer. All control sections collapse.
+- **Freeze scene:** stop simulation motion independently of music playback to inspect a fold or composition.
+- **Native, 4K or Auto resolution:** keep crisp output or let the app reduce rendering cost.
+- **Automatic particle quality:** target 60 FPS, or choose a manual count up to **3,145,728**, where GPU buffer limits permit.
+- **Copy link:** share the mode, palette, tuning, source selection, library song and playhead. Local audio bytes and camera/microphone/tab permissions stay on the original device.
+- **Live telemetry:** see frame rate, frame time and hand-tracking performance in the footer.
+
+| Shortcut | Action |
+| --- | --- |
+| **Space** | Play/pause music; start/stop the selected live input. |
+| **N** | Next visual mode. |
+| **B** | Burst. |
+| **F**, **Enter**, or double-click the background | Toggle fullscreen. |
+| **H** | Hide/show controls. |
+| **Escape** | Restore controls. |
+| Move the mouse | Gently repel nearby particles or smoke. |
+| Click and hold | Push like an open palm. |
+| Command-click and hold | Gather like a closed hand. |
+
+Settings are saved locally and reflected in the address bar. Explicit URL values override the saved values; invalid values are ignored. For example:
+
+```text
+/?mode=fluid-ring&palette=3&song=mitis-endeavors&t=45&force=0.05&gain=2.8
+```
+
+<details>
+<summary>Share-link parameters</summary>
+
+`mode`, `song`, `source` (`reference`, `demo`, `file`, `mic`, `tab`, `youtube`), `youtube` (video ID), `t` (seconds), `count`, `auto` (0/1), `resolution` (`native`, `4k`, `auto`), `force`, `hands` (2/4/8), `showHands` (0/1), `palette`, `effect`, `gain`, `persistent`, `speed`, `glow`, `turbulence`, `emission`, `visibility`, and `immersive` (0/1).
+
+`immersive` hides controls; entering browser fullscreen still requires a user gesture. The playhead updates the current address without adding a new history entry every second.
+
+</details>
+
+## How WebGPU powers EKKO
+
+WebGPU is the browser API that lets JavaScript submit rendering and general computation to the graphics processor. Small programs called **shaders**, written in **WGSL**, run on the GPU. Compute shaders update data; vertex and fragment shaders turn it into an image. See the [WebGPU overview](https://developer.chrome.com/docs/web-platform/webgpu/overview) and [WGSL specification](https://www.w3.org/TR/WGSL/) for the underlying APIs and language.
+
+In EKKO, JavaScript handles controls, audio analysis and frame scheduling. It sends the GPU a compact set of parameters: time, frequency levels, palette choices and hand forces. Particle positions and fluid textures stay on the GPU between frames, so the CPU does not have to move millions of particle records back and forth.
+
+```mermaid
+flowchart LR
+  A[Music / microphone / tab] --> B[Web Audio spectrum and note attacks]
+  C[Camera] --> D[MediaPipe worker: hand landmarks]
+  D --> E[Gesture and motion forces]
+  M[Mouse and settings] --> F[JavaScript frame parameters]
+  B --> F
+  E --> F
+  F --> G[WebGPU compute: particles or fluid]
+  G --> H[Streaks / smoke / volume lighting]
+  H --> I[HDR bloom and tone mapping]
+  I --> J[Canvas]
+```
+
+### Particles: many small jobs at once
+
+Each compute invocation updates one particle's position, velocity and age. Different modes pull particles towards procedural shapes, carry them through swirling flow fields, or leave them free for hand control. Smoke reuses a fixed pool of slots as particles expire, avoiding continuous allocation.
+
+A small density grid approximates local crowd pressure. Particles deposit mass into nearby cells, then read the surrounding density gradient to move apart. This avoids comparing every particle with every other particle, which would become prohibitively expensive at high counts.
+
+Rendering expands each particle into a short, camera-facing streak. One instanced draw handles the whole cloud. Additive blending lets overlapping streaks build up bright folds, while bounded sprite sizes help control the number of pixels shaded.
+
+### Fluid: move the smoke through a velocity field
+
+Fluid smoke and Fluid ring use a 2D staggered grid: velocities sit on cell faces, while pressure sits at cell centres. Each step transports velocity, adds heat-driven buoyancy and interaction forces, reinforces small curls, then iterates a pressure solve to reduce compression. Some artistic forces are added afterwards so the visible push and suction remain strong.
+
+The coloured smoke is a separate, finer dye field. **Limited MacCormack advection** transports it forward, transports it back to estimate error, and applies a bounded correction. That keeps thin edges sharper than repeatedly resampling with simple advection. A separate transported light field lets luminous patches travel with the smoke.
+
+The velocity grid is bounded at **512 × 192** and the dye/light fields at **2048 × 768**. Fluid ring adds up to **262,144** tracers to draw fine filaments without enlarging the pressure grid. The particle-count selector is disabled for these two modes.
+
+### Volume and light: spend detail where it shows
+
+Spectral smoke combines sharp particle filaments with a coarse **96 × 64 × 48** density volume. A sampled subset of particles deposits density into this grid. A top-down scan estimates overhead shadows; camera rays then accumulate scattered light and opacity through it.
+
+The volume is rendered at reduced resolution, capped at 640 pixels on its longest axis, with 24 ray samples in the current setup. Fine filaments remain at scene resolution. Empty samples skip detailed lighting, and rays stop early when the smoke is nearly opaque.
+
+Finally, the scene is kept in an HDR texture so highlights can exceed display brightness. A bright pass extracts highlights at quarter width and height; horizontal and vertical blurs spread them into **bloom**. Tone mapping compresses that light into the display range, and subtle dithering helps hide colour banding.
+
+These choices keep expensive work bounded while preserving visible detail. They do not promise 60 FPS at maximum settings: particle count, screen resolution, tracking load and GPU capabilities all matter. Native and 4K modes keep their selected output resolution; Auto resolution can scale down. If performance drops, start with Auto particles, fewer tracked hands, or Auto resolution.
 
 ## Run locally
+
+Use Node.js compatible with [Vite 7](https://vite.dev/guide/) (20.19+ on the Node 20 line, or 22.12+) and a browser/device with WebGPU enabled and hardware acceleration available. The app needs localhost or HTTPS and has no WebGL fallback.
 
 ```sh
 npm ci
@@ -10,91 +203,70 @@ npm run assets
 npm run dev
 ```
 
-Open http://127.0.0.1:5173/ in a browser with WebGPU and hardware acceleration. Localhost or HTTPS is required. Asset preparation bundles the tracking worker, copies MediaPipe WASM, and downloads Google's Hand Landmarker model if missing.
+Open [localhost:5173](http://127.0.0.1:5173/). Asset preparation bundles the tracking worker, copies MediaPipe WASM and downloads Google's hand-landmarker model if it is missing, so the first setup needs internet access.
+
+**A fresh clone does not include the library recordings.** Use **Audio file**, microphone or tab audio, or supply permitted library files at the paths in [src/music.js](src/music.js). You can still explore the silent animated scene without any recording.
 
 ```sh
 npm test
 npm run build
+npm run preview -- --port 5174
 ```
 
-The production output is in `dist/`. After building, run `npm run preview -- --port 5174` and `node tests/demo-controls.browser.mjs` to verify the demo overlay, mouse controls, and keyboard shortcuts in Chrome with synthetic camera landmarks. Browser GPU checks are available under `tests/`, including `reference.html`, `spectral.html`, `emission.html`, and `forces.html` when running the development server.
+The build is written to `dist/`. If WebGPU cannot initialise, check browser hardware acceleration and GPU availability; EKKO displays the initialization error in the page. If camera access is unavailable, mouse control still works.
 
-## Controls
+### Optional YouTube import API
 
-- **Show hands** in Movement adds a live skeleton and gesture overlay for demos, including fullscreen. The choice is saved and shareable in the URL; the checkbox does not start or stop the camera.
-- One finger: Wand. Two fingers: Vortex (spread to widen). Three fingers: Shockwave. Hold briefly to switch; thumbs are ignored.
-- Closed hand: pull particles into orbit. Open hand: push them away. Opening a closed hand also triggers a burst.
-- One Hand force slider sets pull and push together, with fine low-end control up to 3×. Move the mouse over the scene for soft repulsion. Click and hold to push like an open hand; Command-click and hold to gather like a fist.
-- **Space**: play or pause music. **N**: next mode (wraps around). **B**: burst.
-- **Enter**, **F**, or double-click the background: toggle fullscreen and hide controls.
-- **H**: show or hide controls. **Escape**: restore controls.
-- Choose a local audio file or microphone input. Music never starts automatically after reload; settings and playback position are remembered.
+Vite alone does not run the Python endpoint. For arbitrary-video imports, run `vercel dev` for the full app, or install `requirements.txt` in a Python environment and run the local helper beside Vite:
 
-Camera activation requests normal browser permission. Tracking runs locally in a worker, with interpolation and bounded prediction. Camera and microphone input are not uploaded or recorded by the app. Selected audio files may be retained locally in IndexedDB.
+```sh
+python3 -m pip install -r requirements.txt
+python3 scripts/youtube-dev.py
+```
 
-## Visual modes
+The API uses yt-dlp with its Deno runtime to import public audio tracks, bounded to **20 minutes / 40 MiB**, and deletes temporary files after each response. It does not use browser cookies or login. Private, age-restricted, unavailable or blocked videos produce an error. `EKKO_YOUTUBE_ALLOWED_IDS` can restrict imports to a comma-separated list of video IDs.
 
-- **Fluid smoke:** a 2D incompressible fluid simulation with heat-driven buoyancy, pressure projection, vorticity confinement, and sharp advected smoke density.
-- **Fluid ring:** pressure-projected fluid jets plus native-resolution tracers. Nine independently measured frequency bands run clockwise from bass at the upper left (135°, then 40° steps). Each note attack drives an outward burst; transported light fades after the note ends.
-- **Particle ring:** the original particle ring remains available.
-- **Spectral smoke:** frequency-directed emission, native-resolution filaments, and a bounded volumetric lighting pass.
-- **Smoke light / Original:** coloured smoke ribbons; seven frequency bands control emission and illumination.
-- **Smoke light / Lasting glow:** a separate version of Røyklys with continuous dim neutral smoke and note brightness captured at birth, carried along the ribbon, then faded with age. The original Røyklys is unchanged for comparison.
-- **Fire & ice:** folded warm and cool vortex bundles.
-- **Airbender:** persistent particles controlled by hand forces.
-- **Light shapes:** geometric music-reactive patterns.
+The previous production check on **18 October 2026** recorded `503 youtube-blocked` on Vercel for arbitrary imports; known library links reused hosted audio successfully. Treat arbitrary YouTube import as deployment-dependent. Tab audio is another way to analyse a video already playing in your browser without importing its file.
 
-Every menu section collapses. Each mode has its own settings, collapsed by default: speed and glow, plus turbulence/emission where supported. Settings persist per mode and the current mode’s values travel in shared links.
+## Explore the code
 
-Audio response also multiplies fluid-ring launch momentum independently of the capped visual envelope. The first two bass sectors receive extra onset impulse. Rainbow maps them to red/orange; other palettes remain selectable.
+Start with [common-shader.wgsl](src/common-shader.wgsl) for the shared layout and mode map, then follow [gpu.js](src/gpu.js) to see how buffers, bindings and passes connect. The WGSL files contain explanatory comments on the math, optimizations and their tradeoffs.
 
-Seven palettes, native and 4K output, and particle counts up to **3,145,728** are available where GPU buffer limits permit. Automatic quality targets 60 FPS by adjusting particle count. Manual maximum density does not guarantee 60 FPS; tracking and rendering costs depend on hardware and viewport size. Native and 4K modes retain their output resolution.
+| Files | Responsibility |
+| --- | --- |
+| [main.js](src/main.js) | UI, frame loop, audio/gesture coordination and mode selection. |
+| [showcase.js](src/showcase.js), [showcase-view.js](src/showcase-view.js), [showcase-music.js](src/showcase-music.js) | Guided timeline, matching gesture/cursor demonstrations and the generated instrumental score. |
+| [gpu.js](src/gpu.js) | WebGPU device, buffers, pipelines, render targets and pass scheduling. |
+| [common-shader.wgsl](src/common-shader.wgsl) | Shared particle/uniform layouts, palette, randomness and interaction helpers. |
+| [particles.wgsl](src/particles.wgsl), [render.wgsl](src/render.wgsl) | Particle simulation, density-grid separation and streak drawing. |
+| [reference-simulation.wgsl](src/reference-simulation.wgsl), [reference-render.wgsl](src/reference-render.wgsl) | Analytic plume/vortex flows and fine smoke filaments. |
+| [fluid.js](src/fluid.js), [fluid.wgsl](src/fluid.wgsl) | Fluid pass orchestration, pressure solve, dye/light transport and ring tracers. |
+| [volume.wgsl](src/volume.wgsl), [post-shader.wgsl](src/post-shader.wgsl) | Volumetric lighting, trails, bloom and final compositing. |
+| [audio.js](src/audio.js), [audio-controls.js](src/audio-controls.js) | Audio sources, frequency analysis and note-attack envelopes. |
+| [tracking.js](src/tracking.js), [tracking-worker.js](src/tracking-worker.js), [interactions.js](src/interactions.js) | Hand detection, gesture state and simulation forces. |
+| [preferences.js](src/preferences.js), [url-settings.js](src/url-settings.js) | Saved settings, local audio cache and share links. |
+| [tests/](tests/) | Node tests, browser interaction tests and actual GPU checks. |
 
-Smoke mode uses a staggered velocity grid with a pressure solve, following the grid-fluid approach demonstrated by [Sebastian Lague’s Smoke-Simulation](https://github.com/SebLague/Smoke-Simulation). This is an original WGSL implementation, not a copy or Unity port. A separate, higher-resolution dye field uses limited MacCormack advection to retain smoke detail. The particle-count control is disabled for the two fluid modes; ring detail is bounded to 262,144 tracers. Hand motion stirs the fluid; pull/push add circulation and directional forces. Other smoke modes retain their particle-based renderers. An advected emissive field and HDR bloom provide persistent local light without flashing all the smoke on every beat.
+`node tests/showcase.browser.mjs` and `node tests/showcase-audio.browser.mjs` check the guided tour in Chrome against a local dev server at port 5173 (override with `EKKO_TEST_URL`). They exercise all nine GPU modes, simulated input, playback, pause/replay, restoration and the mobile layout.
 
-`tests/fluid.html` checks actual GPU pressure reduction, buoyancy, finite density, pause, hand response, nine isolated emission directions, silent-band suppression, and carried-light decay. The velocity grid is bounded at 512×192 and the dye field at 2048×768, independently of native/4K output resolution.
+`npm test` runs the Node suite, including mathematical models and mock WebGPU scheduling checks. It does **not** execute the shaders on a GPU. For real GPU checks, serve the app and open the relevant fixture:
 
-## Shareable settings
+- [Fluid](http://127.0.0.1:5173/tests/fluid.html): pressure reduction, buoyancy, hand forces, directional emission and carried-light decay.
+- [Particle separation](http://127.0.0.1:5173/tests/grid-separation.html): density-grid behaviour and GPU readback.
+- [Reference smoke](http://127.0.0.1:5173/tests/reference.html), [spectral smoke](http://127.0.0.1:5173/tests/spectral.html), and [emission](http://127.0.0.1:5173/tests/emission.html): mode-specific rendering and simulation checks.
 
-The address updates as controls change. **Copy link** copies the current setup. Links override saved preferences only for parameters they contain; unrecognised/invalid values are ignored. Opening a link or refreshing loads music paused. Selecting a song starts it immediately. Local file bytes and microphone access cannot be shared by URL.
+With the production preview running on port 5174, `node tests/demo-controls.browser.mjs` checks mouse controls, keyboard shortcuts and the hand overlay in Chrome using synthetic camera landmarks.
 
-For example: `/?mode=fluid-ring&palette=3&song=mitis-endeavors&t=45&force=0.05&gain=2.8`.
+## Privacy, assets and inspiration
 
-Supported keys: `mode`, `song` (library ID), `source` (`reference`, `demo`, `file`, `mic`, `youtube`), `t` (seconds), `count`, `auto` (0/1), `resolution` (`native`, `4k`, `auto`), `force`, `hands`, `palette`, `effect`, `gain`, `persistent`, `speed`, `glow`, `turbulence`, `emission`, and `immersive` (0/1). Immersive hides controls; entering browser fullscreen still requires a gesture. The current playhead updates once per second; changes replace the address without filling browser history.
+Camera and microphone processing stay on your device. EKKO does not upload or record either input. Selected audio files may be retained in local IndexedDB; settings use localStorage. YouTube imports are the exception to local-only sourcing: they request audio through the server endpoint.
 
-## Project layout
+The owner has confirmed hosting permission for the five recordings used by the existing deployment. Those files remain Git-ignored; that permission is not a general redistribution licence for a new deployment. Vite copies any local `public/audio/` files into the build. See [music notes](references/music.md) for sources and filenames.
 
-- `src/gpu.js`: WebGPU resources and render passes.
-- `src/*.wgsl`: particle simulation, rendering, and post-processing.
-- `src/audio.js`, `src/audio-controls.js`: Web Audio analysis and frequency envelopes.
-- `src/tracking.js`, `src/tracking-worker.js`: MediaPipe hand tracking.
-- `src/main.js`: UI, animation, and input coordination.
-- `tests/`: automated Node tests and interactive browser GPU checks.
+The fluid implementation follows the grid-fluid approach demonstrated by [Sebastian Lague's Smoke-Simulation](https://github.com/SebLague/Smoke-Simulation), with original WGSL code. Visual inspiration includes [MatthiasM.de's Particle tests (15)](https://www.youtube.com/watch?v=fpViZkhpPHk); reference-video frames are not app assets. Hand detection uses [MediaPipe Hand Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker/web_js).
 
-## Music and references
+The gallery in `docs/images/` contains captures of EKKO itself. Temporary test captures and external reference assets remain excluded from Git.
 
-The named song presets refer to audio files in `public/audio/`. The owner has confirmed permission to host the five current recordings on the deployed site. They remain excluded from Git, so a fresh clone needs its own permitted copies or the local audio-file picker / microphone. See [music notes](references/music.md) for filenames and source attribution. Reference screenshots, generated assets, test captures, and local agent logs are excluded from Git.
+## Planned mode editor and sharing
 
-Vite copies local `public/audio/` files into `dist/` when they exist. Include only audio you have permission to distribute when publishing a built site.
-
-Visual inspiration: [Particle tests (15) 3D Music Visualizer, MatthiasM.de](https://www.youtube.com/watch?v=fpViZkhpPHk). Reference video frames are not app assets and are not included in this repository.
-
-Tracking uses [MediaPipe Hand Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker/web_js). Fonts are served locally; the tracking model is downloaded during asset preparation.
-
-### YouTube links
-
-Choose **YouTube**, paste a single-video link and select **Load audio**. The five existing music links reuse the hosted library. Other links use `/api/youtube` to import actual AAC/Opus into Web Audio, so spectrum, note attacks and microphone-independent playback all work. Loading and refresh never start playback. Links include the video ID as `youtube` and the playhead as `t`.
-
-The Python API uses pinned yt-dlp plus its Deno runtime, accepts public audio tracks up to 20 minutes / 40 MiB, and deletes temporary files after each response. It does not use YouTube embeds, browser cookies or login. Private/age-restricted/unavailable videos and server bot checks return an explicit error. Production verification on 18 October 2026 returned `503 youtube-blocked` from YouTube on Vercel; arbitrary-video imports currently work locally, while the five hosted library links work on Vercel. A separately hosted extractor would be needed for arbitrary links on the public site. The optional `EKKO_YOUTUBE_ALLOWED_IDS` environment variable can restrict imports to comma-separated video IDs.
-
-Vite alone does not run the Python API: use `vercel dev` for the complete app, or run `python3 scripts/youtube-dev.py` beside Vite after installing `requirements.txt`. Known library links work in either setup.
-
-### Audio from another browser tab
-
-Choose **Tab audio → Share tab** in Music, select the tab playing your video, and enable **Share tab audio** in the browser picker. Desktop Chrome or Edge is recommended; browsers or selected surfaces without an audio track show a clear error. Keep playing/pausing the video in its original tab. EKKO feeds the captured audio into the same analyser as library music, including all frequency-driven smoke, bass impulses and note lighting. No download, transcoding, microphone, recording or upload is needed.
-
-**Stop sharing** (or Space while Tab audio is selected) disconnects EKKO; it does not pause the original video. Browser capture requires a display track, which EKKO requests at low resolution and one frame per second, and never renders or transmits. Switching audio sources or leaving the page releases all capture tracks. Refresh and shared links can remember `source=tab`, but never start capture or open a picker automatically.
-
-Particle ring accelerates with measured bass intensity. Fluid smoke uses stronger upward bass-onset jets on the left, with higher-frequency emitters continuing to the right. Spectral smoke distributes nine frequency sectors around the full circle, with dim smoke between notes.
-
-Airbender and Light shapes have a **Particle visibility** setting under their mode settings, saved separately for each mode and shared as `visibility` in the URL. It controls direct particle brightness independently of Glow. Fullscreen retains a small translucent mouse-position dot.
+Custom WGSL modes, remixing and cloud saves are not implemented yet. The selected storage direction is Neon Postgres, with Vercel Blob for preview images if needed. See the [storage decision](docs/storage.md) for the inactivity requirement and provider references.

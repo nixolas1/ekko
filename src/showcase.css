@@ -1,0 +1,38 @@
+/* Quiet teaching chrome around the live scene: cyan cues, warm cursor feedback,
+   lilac vortices, existing DM Sans / Space Grotesk type, no competing imagery. */
+.tour-launch{font-size:12px;border-color:#8be7ed70;background:#8be7ed18;color:#d3f5f7;white-space:nowrap}
+.showcase{position:fixed;inset:0;z-index:24;pointer-events:none;color:#f5f8ff}
+.showcase-gestures{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.showcase-top{position:absolute;top:24px;left:3vw;right:3vw;display:flex;align-items:center;justify-content:space-between;gap:14px;pointer-events:auto}
+.showcase-top>div{display:flex;align-items:center;gap:22px;text-shadow:0 2px 12px #000}
+.showcase-wordmark{font:700 36px 'Space Grotesk',sans-serif;letter-spacing:-2.5px}
+.showcase-tag{font-size:12px;color:#d2ddeb}
+.showcase-top button{background:#080a14cf;font-size:12px}
+.showcase-top button span{font-size:20px;margin-left:12px;vertical-align:-1px}
+.showcase-lesson{position:absolute;bottom:28px;left:3vw;width:min(470px,calc(100vw - 36px));padding:22px 24px 18px;background:linear-gradient(115deg,#080a14f5,#080a14df 75%,#080a14b8);border-left:2px solid #8be7ed70;pointer-events:auto}
+.showcase-chapters{display:flex;gap:5px;margin-bottom:17px}
+.showcase-chapters button{position:relative;flex:1;min-width:0;height:22px;border:0;padding:0;background:transparent;border-radius:0}
+.showcase-chapters button::before,.showcase-chapters button span{content:'';position:absolute;left:0;right:0;top:10px;height:3px;background:#ffffff30}
+.showcase-chapters button span{background:#8be7ed;transform-origin:left;transform:scaleX(0)}
+.showcase-chapters button[aria-current=step]::before{background:#ffffff70}
+.showcase-mode{margin:0 0 9px;font-size:12px;color:#b8d5e6}
+.showcase h1{font:500 clamp(23px,2.5vw,34px)/1.1 'Space Grotesk',sans-serif;letter-spacing:-.9px;margin:0 0 13px}
+.showcase-description{font-size:13px;line-height:1.6;color:#c6cfde;margin:0;max-width:49ch;min-height:63px}
+.showcase-cue{font-size:12px;color:#8be7ed;line-height:1.5;min-height:18px;margin:15px 0}
+.showcase-actions{display:flex;gap:6px;flex-wrap:wrap}
+.showcase-actions button{font-size:12px;padding:9px 12px}
+.showcase-actions [data-tour=try]{margin-left:auto;background:#b9d9ed;color:#152332;border-color:#b9d9ed;font-weight:600}
+.showcase-options{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;margin-top:14px;font-size:11px;color:#a6b6ca}
+.showcase-options label{display:flex;align-items:center;gap:6px;cursor:pointer}
+.showcase-options input{accent-color:#8be7ed}
+.showcase-options button{font-size:11px;padding:3px 0;border:0;color:#c5dce8;background:none}
+.showcase-music{flex-basis:100%;font-size:10px;color:#98aac1}
+.showcase-message{font-size:12px;color:#f2cf91;line-height:1.5;margin:12px 0 0}
+body.showcase-active,body.showcase-active *{cursor:auto!important}
+body.showcase-active main,body.showcase-active #hand-demo,body.showcase-active #mouse-dot{visibility:hidden!important;pointer-events:none!important}
+body.showcase-active #gpu-error{z-index:30}
+@media(max-width:600px){
+ .showcase-top{top:16px;left:18px;right:18px}.showcase-top>div{display:block}.showcase-wordmark{font-size:29px}.showcase-tag{display:block;font-size:10px;margin-top:5px}
+ .showcase-lesson{left:18px;bottom:max(14px,env(safe-area-inset-bottom));padding:13px 16px 14px}.showcase-chapters{margin-bottom:10px}.showcase h1{font-size:24px}.showcase-description{font-size:12px;min-height:58px}.showcase-cue{font-size:11px;margin:10px 0}.showcase-actions{gap:4px}.showcase-actions button{padding:9px;font-size:11px}.showcase-options{margin-top:10px}.tour-launch{padding:8px;font-size:11px}header{gap:12px}
+}
+@media(max-height:550px){.showcase-lesson{max-height:calc(100dvh - 88px);overflow-y:auto;bottom:12px;width:420px;padding:10px 16px}.showcase-top{top:12px}.showcase-description{min-height:0}.showcase h1{font-size:24px;margin-bottom:8px}.showcase-chapters{margin-bottom:6px}.showcase-cue{margin:8px 0}.showcase-options{margin-top:8px}.showcase-music{display:none}}

@@ -1,6 +1,13 @@
-// Reference modes 5 (plume) and 6 (twin vortex bundles). Standalone: common-shader.wgsl is prepended.
+// Fine-filament renderer for modes 4 (spectral), 5 (plume), 6 (twin vortices),
+// 7 (fluid-ring tracers) and 8 (lasting-glow plume). common-shader.wgsl is prepended.
 // Very fine short streaks; each particle carries a fixed light energy spread over its streak, so faint
 // isolated points vanish and only the projected density of sheets (edge-on folds) reads as bright bands.
+//
+// gpu.js/fluid.js draw one four-vertex triangle strip per particle, with additive
+// RGB blending into the HDR scene. Velocity defines streak direction; the same
+// procedural quad technique as render.wgsl avoids mesh uploads and sprite textures.
+// Fine geometry stays at scene resolution even when volume.wgsl shades a much
+// smaller image. This separates sharp visible detail from broad lighting cost.
 @group(0) @binding(0) var<storage, read> particles: array<Particle>;
 @group(0) @binding(1) var<uniform> params: Parameters;
 struct ReferenceOutput {
@@ -9,12 +16,14 @@ struct ReferenceOutput {
   @location(1) color: vec3f,
   @location(2) halfLength: f32,  // half streak length in sigmas
 }
-// Tuning gains for the main agent: per-particle light energy in pixel units at 1080 px scene height.
+// Artistic gains: per-particle light energy in pixel units at 1080 px scene height.
 const PLUME_GRAY = 0.09;
 const PLUME_LAMP = 0.9;
 const VORTEX_GAIN = 0.16;
 
-// Must match reference-simulation.wgsl.
+// Must match reference-simulation.wgsl. These modules compile separately, so the
+// small deterministic lifetime/side helpers are repeated rather than stored as
+// extra particle fields. Fluid and spectral lifetimes instead come from extra.w.
 fn refLife(id: u32, mode: f32) -> f32 { return select(6.5 + 3.0 * rnd(id, 51u), 9.0 + 4.0 * rnd(id, 51u), (mode > 5.5 && mode < 6.5)); }
 fn refSide(id: u32) -> u32 { return select(0u, 1u, rnd(id, 50u) < 0.55); }
 fn ramp3(a: vec3f, b: vec3f, c: vec3f, t: f32) -> vec3f {
@@ -46,6 +55,9 @@ fn spectralLight(xy: vec2f, response: f32) -> vec4f {
   let mode = params.simulation.x;
   let age = p.extra.y;
   var o: ReferenceOutput;
+  // Fixed-pool particles can be waiting to emit. Placing all four vertices at
+  // the same out-of-view point prevents fragment work without compacting the
+  // particle buffer or reading an active count back to the CPU. Vertex work remains.
   if (age <= 0.0 || p.state.w < 0.5 || (mode>6.5 && mode<7.5 && p.state.z!=7.0)) {
     o.position = vec4f(2.0, 2.0, 2.0, 1.0);
     o.uv = vec2f(0.0);
@@ -76,6 +88,10 @@ fn spectralLight(xy: vec2f, response: f32) -> vec4f {
   o.halfLength = halfLen / sigma;
 
   // Energy normalisation: integral of the streak profile is sigma^2 (2 pi + sqrt(2 pi) * 2 * halfLength).
+  // The two rounded ends integrate like one Gaussian disc; the straight part
+  // contributes its length times a 1D Gaussian. Dividing by area below makes
+  // faster/longer streaks dimmer per pixel instead of emitting extra total light.
+  // This uses the ideal untruncated profile; the quad cuts off its faint tails.
   let area = sigmaPx * sigmaPx * (6.2831853 + 5.013 * o.halfLength);
   let density = select(params.style.z,1.0,mode>6.5 && mode<7.5) * params.style.w * (params.display.z / 1080.0);
   let fade = smoothstep(0.0, 0.35, age) * (1.0 - smoothstep(life * 0.65, life, age));
@@ -151,6 +167,9 @@ fn spectralLight(xy: vec2f, response: f32) -> vec4f {
   return o;
 }
 @fragment fn referenceFragment(input: ReferenceOutput) -> @location(0) vec4f {
+  // Gaussian distance to a line segment, in units of sigma. Doing colour, life
+  // fade and area normalisation in the vertex stage leaves very little per-pixel
+  // math here, which matters when many translucent streaks overlap.
   let beyond = max(abs(input.uv.x) - input.halfLength, 0.0);
   let r2 = beyond * beyond + input.uv.y * input.uv.y;
   return vec4f(input.color * exp(-0.5 * r2), 0.0);

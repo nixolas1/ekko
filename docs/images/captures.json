@@ -1,0 +1,59 @@
+{
+  "captured": "2026-10-18",
+  "source": "Live EKKO app at localhost, Google Chrome with WebGPU",
+  "viewport": [
+    1920,
+    1080
+  ],
+  "format": "JPEG screenshots, quality 94, no post-processing",
+  "audio": "MitiS \u2014 Endeavors, installed local library file; playback started at 65 seconds",
+  "recreate": "Serve EKKO with the library file installed. Append a frame settings query to the app URL, press Space and let the simulation develop. URLs preserve tuning and audio position, not simulation state, so exact folds vary. Camera was unavailable in the capture browser.",
+  "frames": [
+    {
+      "file": "smoke-light.jpg",
+      "mode": "Smoke light \u00b7 original \u00b7 audio",
+      "settings": "mode=plume&palette=3&glow=1.7&emission=2.2&count=1048576&t=76.9&source=reference&song=mitis-endeavors&auto=0&immersive=1&resolution=native&gain=2.3&speed=1&force=0.3&showHands=0&hands=2&effect=0&persistent=0&turbulence=1&visibility=1",
+      "trackPosition": "1:17 / 3:38"
+    },
+    {
+      "file": "fire-and-ice.jpg",
+      "mode": "Fire & ice \u00b7 audio",
+      "settings": "mode=duet&palette=6&glow=1.7&emission=1&count=1048576&t=76.6&source=reference&song=mitis-endeavors&auto=0&immersive=1&resolution=native&gain=2.3&speed=1&force=0.3&showHands=0&hands=2&effect=0&persistent=0&turbulence=1&visibility=1",
+      "trackPosition": "1:17 / 3:38"
+    },
+    {
+      "file": "spectral-smoke.jpg",
+      "mode": "Spectral smoke \u00b7 audio",
+      "settings": "mode=spectral&palette=3&glow=1.6&emission=1&count=1048576&t=88.8&source=reference&song=mitis-endeavors&auto=0&immersive=1&resolution=native&gain=2.3&speed=1&force=0.3&showHands=0&hands=2&effect=0&persistent=0&turbulence=1&visibility=1",
+      "trackPosition": "1:29 / 3:38"
+    },
+    {
+      "file": "fluid-ring.jpg",
+      "mode": "Fluid ring \u00b7 audio",
+      "settings": "mode=fluid-ring&palette=3&glow=1.5&emission=1.7&count=262144&t=88.8&source=reference&song=mitis-endeavors&auto=0&immersive=1&resolution=native&gain=2.3&speed=1&force=0.3&showHands=0&hands=2&effect=0&persistent=0&turbulence=1&visibility=1",
+      "trackPosition": "1:28 / 3:38"
+    },
+    {
+      "file": "fluid-smoke.jpg",
+      "mode": "Fluid smoke \u00b7 audio",
+      "settings": "mode=smoke&palette=3&glow=1.4&emission=1.8&count=262144&t=76.9&source=reference&song=mitis-endeavors&auto=0&immersive=1&resolution=native&gain=2.3&speed=1&force=0.3&showHands=0&hands=2&effect=0&persistent=0&turbulence=1&visibility=1",
+      "trackPosition": "1:16 / 3:38"
+    },
+    {
+      "file": "controls.jpg",
+      "mode": "Smoke light \u00b7 original",
+      "setup": "Same session and settings as smoke-light.jpg; captured after 24 seconds of playback, then H to reveal controls."
+    }
+  ],
+  "guidedTour": {
+    "file": "guided-tour.jpg",
+    "viewport": [
+      1440,
+      900
+    ],
+    "format": "JPEG screenshot, quality 92, no post-processing",
+    "mode": "Smoke light \u00b7 Original",
+    "audio": "Built-in generated score: First light",
+    "recreate": "Start Take the tour, choose chapter 2, and let it run for about 4 seconds. Simulated Wand controls and automatic particle quality are active."
+  }
+}

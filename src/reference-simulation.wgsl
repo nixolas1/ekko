@@ -1,13 +1,25 @@
-// Reference modes, appended to particles.wgsl. Mode 5: a rising plume of fine smoke sheets lit by
-// emerald/cyan lamps along a curved emitter. Mode 6: two rolling vortex bundles, warm left and cool right.
-// Every flow below is divergence-free (a curl or an axisymmetric Stokes stream function), so particles
-// emitted continuously from a line keep tracing coherent folded sheets instead of clumping.
+// Reference modes, appended to particles.wgsl after common-shader.wgsl. Mode 5:
+// rising smoke sheets lit along a curved emitter; mode 6: two rolling vortex
+// bundles; mode 8: the plume with dim continuous smoke and light captured at birth.
+// simulate() in particles.wgsl calls simulateReference(); this file has no entry
+// point of its own and shares params, rnd(), separation() and interaction helpers.
+//
+// The analytic fields use curls and axisymmetric stream functions to make
+// divergence-free flow in their intended domain. Nearby particles follow a
+// shared smooth field, folding a line of emissions into visible sheets. Added
+// interactions, discrete integration and domain clamps can break that ideal.
+// Unlike fluid.wgsl, these modes do not iterate a pressure grid: they evaluate
+// prescribed velocity formulas per particle. This saves grid passes but does
+// not simulate smoke pushing back on its environment or arbitrary fluid boundaries.
 // Particle layout in these modes:
-//   position: xyz, w = mode 5: lamp hue step 0..7 plus glow * 0.5 in the fraction; mode 6: olive mixing 0..1
+//   position: xyz, w = mode 5: lamp hue step 0..7 plus glow * 0.5 in the fraction;
+//                     mode 6: olive mixing 0..1; mode 8: captured emission strength * 0.65
 //   velocity: xyz total velocity (streak direction), w = impulse x
 //   state:    last burst serial, heat, mode, initialised
 //   extra:    emitter parameter u 0..1, age (negative while waiting to be born), impulse y, impulse z
 // The impulse is the hand/burst velocity on top of the analytic flow; it decays, so shapes recover.
+// Packing mode-specific values into the shared 64-byte record avoids extra
+// per-particle buffers. Keep reference-render.wgsl in sync when changing meanings.
 
 struct RefCurl { potential: vec3f, curl: vec3f }
 struct RefBundle { center: vec3f, axis: vec3f, size: vec2f } // size: ring radius, core width
@@ -18,17 +30,26 @@ fn refFit() -> f32 { return clamp(params.clock.z / 1.6, 0.6, 1.1); }
 // Same horizontal centring as the sculptures: shifted right of the intro, centred when filling the scene.
 fn refOffset() -> f32 { return mix(0.1, 0.0, clamp(params.style.y, 0.0, 1.0)) * params.clock.z * clamp(params.clock.z / 1.2, 0.45, 1.0); }
 // smoothstep value and its derivative.
+// Returning both avoids estimating the derivative with extra field evaluations;
+// refLayer/refJet need it to fade a flow without introducing compression.
 fn refStep(a: f32, b: f32, x: f32) -> vec2f {
   let s = clamp((x - a) / (b - a), 0.0, 1.0);
   return vec2f(s * s * (3.0 - 2.0 * s), 6.0 * s * (1.0 - s) / (b - a));
 }
 fn refBasis(n: vec3f) -> mat2x3f {
+  // Build two perpendicular vectors around a unit axis. Switch the helper axis
+  // near the pole so their cross product does not collapse to almost zero.
   let b1 = normalize(cross(n, select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(n.y) > 0.9)));
   return mat2x3f(b1, cross(n, b1));
 }
 
 // Sum of plane waves A = a sin(k.q + wt) / |k|; its curl is (dir x a) cos(k.q + wt).
 // Directions follow a Fibonacci sphere, so no axis dominates and neighbouring points share phases.
+// Evaluate potential and curl together using their analytic formulas: computing
+// curl with finite differences would need several extra samples of the potential.
+// Only a few waves are used per frequency scale; more waves add variation but
+// multiply trigonometric work for every particle. 1/sqrt(count) normalises their
+// approximate combined amplitude so adding waves does not simply amplify motion.
 fn refWaves(q: vec3f, t: f32, base: f32, count: u32, salt: f32) -> RefCurl {
   var potential = vec3f(0.0);
   var curl = vec3f(0.0);
@@ -51,6 +72,8 @@ fn refWaves(q: vec3f, t: f32, base: f32, count: u32, salt: f32) -> RefCurl {
 }
 // curl(g(y) A) = g curl A + grad g x A, with grad g = (0, g', 0): turbulence fades in with height
 // without breaking incompressibility.
+// Simply multiplying velocity by g would omit the derivative term. Fading the
+// vector potential and then taking its curl preserves the divergence-free design.
 fn refLayer(w: RefCurl, g: vec2f, amplitude: f32) -> vec3f {
   return (w.curl * g.x + vec3f(w.potential.z, 0.0, -w.potential.x) * g.y) * amplitude;
 }
@@ -76,6 +99,9 @@ fn refPlumeFlow(q: vec3f, t: f32) -> vec3f {
   v.x += (-0.09 + 0.07 * sin(t * 0.053 + 1.3)) * smoothstep(0.5, 1.5, h);
   // Eddies ride up with the smoke (frozen turbulence), so folds persist instead of shimmering.
   // Laminar at the emitter, billowing above.
+  // Three frequency scales provide large billows, medium folds and fine ripples.
+  // Fewer waves and lower amplitudes at fine scales bound cost and avoid letting
+  // tiny motion overwhelm the coherent sheets created by the larger scales.
   let carried = vec3f(q.x, q.y - 0.24 * t, q.z);
   v += refLayer(refWaves(carried, t * 0.6, 2.4, 6u, 0.0), refStep(0.05, 1.1, h), 0.34 * (1.0 + bands.y * 0.6));
   v += refLayer(refWaves(carried, t, 6.2, 5u, 11.0), refStep(0.0, 0.55, h), 0.1);
@@ -133,6 +159,10 @@ fn refBundle(side: u32, t: f32) -> RefBundle {
 // Vortex ring from the stream function psi = strength * rho^2 * exp(-((rho - R)^2 + s^2) / w^2):
 // u_rho = -(1/rho) dpsi/ds, u_s = (1/rho) dpsi/drho, plus an axisymmetric swirl. Flow goes through the hole
 // along +axis, rolls over the core and returns outside: closed whorls that particles wind round.
+// rho is distance from the bundle axis and s is distance along it. Derivatives
+// of one stream function couple axial and radial speeds consistently, producing
+// circulation without solving a velocity grid. The apparent 1/rho factors have
+// been cancelled algebraically in vr/vs; the direction still needs a safe divisor.
 fn refRing(p: vec3f, b: RefBundle, strength: f32, swirl: f32) -> vec3f {
   let r = p - b.center;
   let s = dot(r, b.axis);
@@ -225,7 +255,10 @@ fn refSpawn(id: u32, mode: f32, warm: bool) -> Particle {
   let birth = t - max(age, 0.0);
   var q = refOrigin(id, u, mode, key, birth);
   // Warm start: integrate the analytic flow over the particle's age (midpoint rule) so the first frame
-  // already shows developed sheets. Runs once per mode change.
+  // already shows developed sheets. Used for initialisation/mode changes and
+  // invalid-state recovery, not ordinary recycling. At most 24 steps limit this
+  // burst of work, but each midpoint step evaluates the field twice and can still
+  // make initialisation more expensive than a steady-state simulation frame.
   if (warmStart) {
     let steps = clamp(u32(ceil(age / 0.3)), 1u, 24u);
     let h = age / f32(steps);
@@ -258,6 +291,10 @@ fn simulateReference(id: u32, old: Particle) -> Particle {
   if (p.state.w < 0.5 || p.state.z != mode || invalid) { p = refSpawn(id, mode, true); }
   if (dt == 0.0) { return p; }
   if ((mode < 5.5 || mode > 7.5) && params.simulation.y > 0.5 && p.extra.y < 0.0) {
+    // Negative age marks an inactive slot. A time-scaled event probability gates
+    // emission per audio band; mode 8 adds a baseline even when the band is quiet.
+    // Early return skips analytic flow/interaction work until this slot is born,
+    // while retaining a fixed-size pool instead of allocating individual particles.
     let band=emissionLevel(id % 7u,params.emissionLow,params.emissionHigh);
     let strength=smoothstep(.06,.85,band);
     let chance=1.0-exp(-(strength*strength*strength*3.5+select(0.0,.16,mode>7.5))*params.tuning.w*dt);
@@ -302,6 +339,9 @@ fn simulateReference(id: u32, old: Particle) -> Particle {
   // Very weak density pressure: separates coincident points in the ring cores without blurring the sheets.
   v += vec3f(separation(q.xy, id) * dt * 0.02, 0.0);
   var impulse = v - flowV;
+  // Store only the interaction residual separately from the analytic velocity.
+  // Next frame recomputes the field at the new position and decays this residual,
+  // so hand motion does not permanently replace the underlying plume/vortex.
   impulse *= min(1.0, 3.0 / max(length(impulse), 0.001));
   v = flowV + impulse;
   v=vec3f(mouseVelocity(q.xy,v.xy,params.mouse,dt),v.z);
