@@ -136,6 +136,10 @@ Tab audio depends on browser and sharing-surface support; the app's UI guides de
 | --- | --- |
 | **Space** | Play/pause music; start/stop the selected live input. |
 | **N** | Next visual mode. |
+| **1–7** (top row) | With controls hidden: Aurora, Ember, Ocean, Rainbow, Neon, Silver, Fire & ice, respectively. |
+| **.** | With controls hidden: next library song (plays immediately). |
+| **← / →** | With controls hidden: decrease/increase hand force. Hold to keep adjusting. |
+| **↓ / ↑** | With controls hidden: decrease/increase particle count; switches Auto to a manual count. Unavailable in fluid simulation modes. |
 | **B** | Burst. |
 | **F**, **Enter**, or double-click the background | Toggle fullscreen. |
 | **H** | Hide/show controls. |

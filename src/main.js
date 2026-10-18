@@ -334,11 +334,30 @@ addEventListener('keydown',e=>{
     return;
   }
   if(e.key==='Meta')mouseHand.metaKey=true;
-  const action=shortcutAction(e,document.activeElement);if(!action)return;
+  const controlsHidden=document.body.classList.contains('immersive')&&!document.body.classList.contains('settings-peek');
+  const action=shortcutAction(e,document.activeElement,controlsHidden);if(!action)return;
   e.preventDefault();
   if(action==='music')void toggleAudio();
   if(action==='fullscreen')void toggleFullscreen();
   if(action==='next-mode'){const modes=[...document.querySelectorAll('[data-mode]')].map(b=>b.dataset.mode);selectMode(modes[(modes.indexOf(physicsMode)+1)%modes.length]);}
+  if(action==='next-song'){
+    const select=$('track-select');select.selectedIndex=(select.selectedIndex+1)%select.options.length;
+    select.dispatchEvent(new Event('change'));
+  }
+  if(action.startsWith('palette-'))document.querySelector(`[data-palette="${action.slice(8)}"]`)?.click();
+  if(action==='force-down'||action==='force-up'){
+    const slider=$('force-power');
+    // Use the same cubic scale as the slider, with finer changes at low forces.
+    slider.value=Number(slider.value)+(action==='force-up'?10:-10);
+    slider.dispatchEvent(new Event('input'));notice(`Hand force · ${$('force-power-value').textContent}`);
+  }
+  if(action==='particles-down'||action==='particles-up'){
+    const select=$('particles');
+    if(select.disabled){notice('This mode uses a fluid simulation; particle count does not apply.');return;}
+    const counts=[...select.options].filter(o=>o.value!=='auto'&&!o.disabled).map(o=>Number(o.value));
+    const count=action==='particles-up'?counts.find(n=>n>engine.count)??counts.at(-1):counts.findLast(n=>n<engine.count)??counts[0];
+    select.value=String(count);select.dispatchEvent(new Event('change'));notice(`${count.toLocaleString('en-GB')} particles`);
+  }
   if(action==='burst')$('burst').click();
   if(action==='hide')setImmersive(!document.body.classList.contains('immersive'));
   if(action==='escape')setImmersive(false);
