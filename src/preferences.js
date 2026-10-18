@@ -16,7 +16,7 @@ export function normalizeSettings(value={}){
     showHands:s.showHands===true,
     maxHands:[2,4,8].includes(s.maxHands)?s.maxHands:2,
     palette:[0,1,2,3,4,5,6].includes(s.palette)?s.palette:0,
-    effect:[0,1,2,3].includes(s.effect)?s.effect:0,
+    effect:[0,1,2,3,4].includes(s.effect)?s.effect:0,
     persistent:typeof s.persistent==='boolean'?s.persistent:true,
     physicsMode:['fluid-ring','plume-glow','smoke','ring','spectral','plume','duet','hand-fire','persistent','sculpture'].includes(s.physicsMode)?s.physicsMode:'smoke',
     modeSettings:normalizeModeSettings(s.modeSettings),

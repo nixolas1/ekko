@@ -7,5 +7,5 @@ try{
  await page.goto((process.env.EKKO_TEST_URL||'http://127.0.0.1:5173')+'/tests/hand-powers.html');
  const result=await page.evaluate(()=>window.runHandPowers());
  assert.deepEqual(errors,[]);assert(result.pass,JSON.stringify(result,null,2));
- console.log('PASS: pointing matches mouse obstacle output in all nine GPU modes; Wand, Vortex, Push and palm burst remain functional.');
+ console.log('PASS: depth-scaled pull/push in all ten GPU modes; pointing, Wand, Vortex and palm bursts remain functional.');
 }finally{await browser.close();}

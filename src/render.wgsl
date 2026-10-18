@@ -22,10 +22,54 @@ fn ramp(a: vec3f, b: vec3f, c: vec3f, d: vec3f, t: f32) -> vec3f {
   return mix(c, d, s - 2.0);
 }
 fn palette(t: f32) -> vec3f { return lightPalette(params.display.x, t); }
+
+// Each physical particle has a direct image plus two approximate bent-light
+// images of the back of the disk. All images follow that particle's actual
+// position; grabbing or bursting the disk therefore disrupts the arcs too.
+fn accretionVertex(corner: vec2f, instance: u32) -> VertexOutput {
+  let count = u32(params.clock.w);
+  let p = particles[instance % count];
+  let imageId = instance / count;
+  let q = p.position.xyz;
+  let head = accretionImage(q, imageId);
+  let projectedVelocity = (head - accretionImage(q - p.velocity.xyz * .008, imageId)) / .008;
+  let speed = length(projectedVelocity);
+  let dir = projectedVelocity / max(speed, .0001);
+  let perp = vec2f(-dir.y, dir.x);
+  let pixel = 2.0 / params.display.z;
+  let w = pixel * select(.72, .6, imageId > 0u);
+  let trail = min(speed * .009, .022);
+  let halfLength = trail * .5 + w * 3.0;
+  let world = head - dir * trail * .5 + dir * corner.x * halfLength + perp * corner.y * w * 3.0;
+  let r = length(q.xz);
+  let temperature = clamp((r - .4) / 1.05, 0.0, 1.0);
+  // Warm thermal emission for the default look, with the normal palette controls.
+  var tint = mix(vec3f(1.0, .88, .62), vec3f(1.0, .28, .045), temperature);
+  if (params.display.x > .5) { tint = mix(palette(temperature), vec3f(1.0, .91, .73), .3 * (1.0 - temperature)); }
+  let doppler = clamp(1.0 + p.velocity.z * .55, .4, 1.8);
+  var intensity = params.style.z * params.style.w * (.35 + .65 * (1.0 - temperature)) * doppler;
+  intensity *= .6 + p.extra.w * .7 + p.state.y * 1.5 + params.sound.w * .4;
+  if (imageId == 0u) {
+    // The back of the disk disappears behind the shadow; foreground material crosses it.
+    let screenRadius = length(head - accretionCenter()) / accretionScale();
+    if (q.z < 0.0) { intensity *= smoothstep(.375, .39, screenRadius); }
+  } else {
+    intensity *= select(.72, .42, imageId == 2u);
+    intensity *= (1.0 - smoothstep(-.035, .015, q.z)) * (1.0 - smoothstep(.06, .3, abs(q.y)));
+  }
+  intensity *= smoothstep(.25, .42, length(q));
+  var out: VertexOutput;
+  out.position = vec4f(world.x / params.clock.z, world.y, 0.0, 1.0);
+  out.uv = vec2f(corner.x * halfLength / w, corner.y * 3.0);
+  out.color = tint * intensity;
+  out.lengthRatio = trail / w;
+  return out;
+}
 @vertex fn vertex(@builtin(vertex_index) vertexId: u32, @builtin(instance_index) id: u32) -> VertexOutput {
   // Bit operations generate the four (-1/+1, -1/+1) corners from vertex ids 0..3.
   // The head follows the particle; the quad extends backwards along velocity.
   let corner = vec2f(f32(vertexId & 1u), f32(vertexId >> 1u)) * 2.0 - 1.0;
+  if (params.simulation.x < .5 && params.style.x > 3.5) { return accretionVertex(corner, id); }
   let p = particles[id];
   let smoke = params.simulation.x > 1.5;
   let persp = 1.0 / (1.0 - clamp(p.position.z, -1.0, 1.0) * 0.35);

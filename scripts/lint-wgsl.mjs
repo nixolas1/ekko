@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 const root=fileURLToPath(new URL('../',import.meta.url));
 // Match ParticleEngine.module: common prefix, then each complete shader module.
-const bundles=[['particles.wgsl','reference-simulation.wgsl'],...['fluid.wgsl','render.wgsl','reference-render.wgsl','post-shader.wgsl','volume.wgsl'].map(name=>[name])];
+const bundles=[['particles.wgsl','reference-simulation.wgsl','accretion.wgsl'],...['fluid.wgsl','render.wgsl','reference-render.wgsl','post-shader.wgsl','volume.wgsl'].map(name=>[name])];
 // Naga accepts mixed logical precedence that browser Tint rejects. WGSL requires
 // explicit grouping, so enforce that rule before semantic validation as well.
 export function validateLogicalGrouping(code,name){

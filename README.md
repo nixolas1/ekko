@@ -52,7 +52,7 @@ The scene also animates without audio. Opening a saved link or reloading keeps m
 | **Spectral smoke** | A full-circle spectrum of fine filaments inside softly shaded volumetric smoke. Nine frequency sectors control emission and lighting. |
 | **Particle ring** | Outward streams of particles that accelerate with bass intensity. Pull and push the ring with your hands or mouse. |
 | **Airbender** | A persistent cloud of particles. Gather them into an orbit, drag them across the screen, then send them flying. |
-| **Light shapes** | Music-reactive geometry: Wave wreath, Light ribbons, Wave field and Angular trails. Hand forces disturb the shapes as they move. |
+| **Light shapes** | Music-reactive geometry: Wave wreath, Light ribbons, Wave field, Angular trails and Accretion disk. The accretion disk integrates particle orbits under central gravity, with gradual inward drift and approximate lensed particle images above and below the shadow. Music, mouse, hand forces and bursts disturb the disk. Hand forces disturb the shapes as they move. |
 
 ![Warm gold and cool blue smoke folding into two sweeping vortices in EKKO](docs/images/fire-and-ice.jpg)
 
@@ -84,8 +84,8 @@ Camera tracking turns hand landmarks into forces in the simulation. The preview 
 | Raise your index finger | **Cursor:** gently repel nearby particles and smoke at your fingertip. Move closer to the camera to grow the effect, or farther away to shrink it (a quarter to four times the selected pointing size). Each new pointing gesture resets the distance reference. |
 | Pinch thumb and index fingertips together | **Wand:** gather light into a small moving core at the pinch. |
 | Raise index and middle fingers | **Vortex:** stir an orbit. Spread the fingertips to widen it. |
-| Close your hand | **Gather:** pull particles into orbit. |
-| Open your palm | **Push:** repel the scene. Opening a closed hand also triggers a burst. |
+| Close your hand | **Gather:** pull particles into orbit. Move closer for stronger pull, farther away for less. |
+| Open your palm | **Push:** repel the scene. Move closer for stronger repulsion, farther away for less. Opening a closed hand also triggers a burst. |
 
 Hold gestures briefly to switch powers. Pinching works with the other fingers raised or curled. Three raised fingers have no special effect. **Hand force** adjusts pull and push together, with fine control at low strengths. Choose tracking for **2, 4 or 8 hands** to let more people join in; two hands has the lowest tracking load.
 

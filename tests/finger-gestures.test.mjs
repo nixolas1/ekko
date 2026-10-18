@@ -246,3 +246,43 @@ test('two pointing hands keep independent depth references when detections reord
   const byId=Object.fromEntries(feed(f,frames,{start:initial.end}).samples.at(-1).map(s=>[s.id,s]));
   assert(near(byId[4].pointDepthScale,1.5**2,.001));assert(near(byId[9].pointDepthScale,.6**2,.001));
 });
+
+test('fist and open palm scale force with gesture-relative depth and preserve the force slider',()=>{
+  for(const up of [FIST,OPEN])for(const aspect of [1,16/9]){
+    const f=new HandForces();let time=1000;
+    const move=palm=>{const run=feed(f,repeat(hand({up,palm,aspect}),30),{start:time,aspect});time=run.end;return run.samples.at(-1)[0];};
+    const sign=up===FIST?1:-1;
+    assert(near(move(.1).strength,sign*18));
+    const nearHand=move(.2);
+    assert(near(nearHand.strength,sign*72,.01));
+    assert(near(handForce(nearHand,true,.5,.5)[2],sign*36,.01));
+    assert.equal(Math.abs(handForce(nearHand,true,0,0)[2]),0);
+    assert(near(move(.05).strength,sign*4.5,.01));
+    assert(near(move(.1).strength,sign*18,.01));
+  }
+});
+
+test('changing palm gesture and reacquiring a hand resets depth; brief pose noise does not',()=>{
+  const f=new HandForces();
+  let run=feed(f,[...repeat(hand({up:FIST,palm:.1}),12),...repeat(hand({up:FIST,palm:.2}),30)]);
+  run=feed(f,[hand({up:OPEN,palm:.2}),...repeat(hand({up:FIST,palm:.2}),12)],{start:run.end});
+  assert(near(run.samples.at(-1)[0].strength,72,.01));
+  run=feed(f,repeat(hand({up:OPEN,palm:.2}),20),{start:run.end});
+  assert(near(run.samples.at(-1)[0].strength,-18,.01));
+  run=feed(f,repeat(hand({up:OPEN,palm:.1}),30),{start:run.end});
+  assert(near(run.samples.at(-1)[0].strength,-4.5,.01));
+  run=feed(f,repeat([],12),{start:run.end});
+  run=feed(f,repeat(hand({up:OPEN,palm:.1}),15),{start:run.end});
+  assert(near(run.samples.at(-1)[0].strength,-18,.01));
+});
+
+test('fist and palm keep separate depth references when hand order swaps',()=>{
+  const f=new HandForces();
+  const initial=feed(f,repeat({hands:[hand({up:FIST,palm:.1}),hand({up:OPEN,palm:.2})],ids:[4,9]},12));
+  const frames=Array.from({length:30},(_,i)=>{
+    const a=hand({up:FIST,palm:.2}),b=hand({up:OPEN,palm:.1});
+    return i%2?{hands:[a,b],ids:[4,9]}:{hands:[b,a],ids:[9,4]};
+  });
+  const byId=Object.fromEntries(feed(f,frames,{start:initial.end}).samples.at(-1).map(s=>[s.id,s]));
+  assert(near(byId[4].strength,72,.01));assert(near(byId[9].strength,-4.5,.01));
+});

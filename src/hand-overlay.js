@@ -63,12 +63,12 @@ export class HandOverlay {
       ctx.beginPath();[0,5,9,13,17].forEach((i,k)=>{const p=xy(points[i]);k?ctx.lineTo(...p):ctx.moveTo(...p);});ctx.closePath();
       ctx.fillStyle=color+'18';ctx.fill();
       ctx.beginPath();for(const [a,b] of EDGES){ctx.moveTo(...xy(points[a]));ctx.lineTo(...xy(points[b]));}
-      ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle=color;ctx.lineWidth=2;ctx.shadowColor=color;ctx.shadowBlur=7;ctx.stroke();ctx.shadowBlur=0;
+      ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle=color;ctx.lineWidth=1.3;ctx.shadowColor=color;ctx.shadowBlur=3;ctx.stroke();ctx.shadowBlur=0;
       points.forEach((p,i)=>{
         const tip=[8,12,16,20].indexOf(i),active=hand.gesture==='wand'?(i===4||i===8):tip>=0&&hand.fingers[tip];
-        ctx.beginPath();ctx.arc(...xy(p),active?3.4:i===0?3:1.8,0,Math.PI*2);
+        ctx.beginPath();ctx.arc(...xy(p),active?2.4:i===0?2:1.2,0,Math.PI*2);
         ctx.fillStyle=active?'#f6fbff':color;ctx.fill();
-        if(active){ctx.beginPath();ctx.arc(...xy(p),5.8,0,Math.PI*2);ctx.strokeStyle=color+'70';ctx.lineWidth=1;ctx.stroke();}
+        if(active){ctx.beginPath();ctx.arc(...xy(p),4.2,0,Math.PI*2);ctx.strokeStyle=color+'70';ctx.lineWidth=1;ctx.stroke();}
       });
     }
   }

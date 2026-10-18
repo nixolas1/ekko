@@ -321,7 +321,7 @@ fn simulateSmoke(id: u32, old: Particle) -> Particle {
     let dist = length(delta);
     let n = delta / max(dist, 0.001);
     let influence = exp(-dot(delta, delta) / max(f.w * f.w, 0.001));
-    let strength = min(abs(f.z), 24.0);
+    let strength = min(abs(f.z), 216.0);
     var wantedFlow = n * clamp((dist - 0.1) * 4.0, -0.8, 1.4) + vec2f(-n.y, n.x) * 1.2 + params.forceVel[j].xy * 0.65;
     if (f.z < 0.0) { wantedFlow = -n * 2.0 + params.forceVel[j].xy * 0.5; }
     wantedFlow=gestureFlow(wantedFlow,delta,f.w,params.forceVel[j].xy,params.forceVel[j].zw);
@@ -360,6 +360,7 @@ fn simulate(@builtin(global_invocation_id) gid: vec3u) {
   if (params.simulation.x > 8.5) { particles[id] = simulateHandFire(id, p); return; }
   if (params.simulation.x > 4.5) { particles[id] = simulateReference(id, p); return; }
   if (params.simulation.x > 1.5) { particles[id] = simulateSmoke(id, p); return; }
+  if (params.simulation.x < .5 && params.style.x > 3.5) { particles[id] = simulateAccretion(id, p); return; }
   let t = params.clock.x;
   let dt = params.clock.y;
   let aspect = params.clock.z;
@@ -494,7 +495,7 @@ fn simulate(@builtin(global_invocation_id) gid: vec3u) {
     let d = f.xy - q.xy;
     let dd2 = dot(d, d);
     let dd = sqrt(dd2);
-    let s = clamp(abs(f.z), 0.0, 24.0);
+    let s = clamp(abs(f.z), 0.0, 216.0);
     let range2 = max(f.w * f.w, 0.0009);
     let ordinaryInfluence=select(exp(-(dd2 + 0.02) / range2),1.0/(1.0+dd2/(range2*.45)),persistent);
     let infl=mix(ordinaryInfluence,exp(-dd2/range2),params.forceVel[j].z+params.forceVel[j].w);

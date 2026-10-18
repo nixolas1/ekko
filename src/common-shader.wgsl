@@ -47,6 +47,48 @@ struct Parameters {
 // 7 fluid ring, 8 lasting-glow plume, 9 hand fire. gpu.js routes 2/7 to fluid.js instead of
 // the particle compute pass; mode 7 shares the reference particle renderer.
 const TAU = 6.2831853;
+
+// Accretion particles live in a 3D disk in the x/z plane. Projection helpers
+// keep mouse/hand interaction in the same screen coordinates as other modes.
+fn accretionScale() -> f32 {
+  return min(1.0, params.clock.z / 1.65) * mix(.9, 1.05, params.style.y);
+}
+fn accretionCenter() -> vec2f {
+  return vec2f(mix(.1, 0.0, params.style.y) * params.clock.z * min(params.clock.z / 1.2, 1.0), .03);
+}
+fn accretionProject(q: vec3f) -> vec2f {
+  let p = vec2f(q.x, q.y * .9928 + q.z * .12);
+  return vec2f(p.x * .999 - p.y * .045, p.x * .045 + p.y * .999) * accretionScale() + accretionCenter();
+}
+fn accretionLift(v: vec2f) -> vec3f {
+  let p = v / max(accretionScale(), .05);
+  return vec3f(p.x * .999 + p.y * .045, (-p.x * .045 + p.y * .999) / .9928, 0.0);
+}
+fn accretionImage(q: vec3f, imageId: u32) -> vec2f {
+  if (imageId == 0u) { return accretionProject(q); }
+  let radius = length(q.xz);
+  let angle = atan2(abs(q.z), q.x);
+  let ring = .403 + max(radius - .43, 0.0) * select(.18, .10, imageId == 2u);
+  let xy = vec2f(cos(angle) * ring, sin(angle) * ring * select(1.0, -1.0, imageId == 2u) + q.y * .5);
+  return vec2f(xy.x * .999 - xy.y * .045, xy.x * .045 + xy.y * .999) * accretionScale() + accretionCenter();
+}
+// Forces can hit any visible image of a particle, including the lensed arcs.
+fn accretionInteractionImage(q: vec3f, point: vec2f) -> u32 {
+  var best = 0u;
+  var distance = length(accretionImage(q, 0u) - point);
+  if (q.z < 0.0 && abs(q.y) < .3) {
+    for (var i = 1u; i < 3u; i++) {
+      let d = length(accretionImage(q, i) - point);
+      if (d < distance) { distance = d; best = i; }
+    }
+  }
+  return best;
+}
+fn accretionImageLift(v: vec2f, q: vec3f, imageId: u32) -> vec3f {
+  let lifted = accretionLift(v);
+  if (imageId == 0u) { return lifted; }
+  return lifted * vec3f(clamp(length(q.xz) / .5, 1.0, 3.0), 2.0, 1.0);
+}
 // Integer hashing gives reproducible variation without a random-state buffer.
 // Different salts let one particle have unrelated lifetime, colour and position
 // samples; reuse the same id/salt when a property should stay stable over time.

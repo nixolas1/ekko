@@ -2,6 +2,7 @@ import commonCode from './common-shader.wgsl?raw';
 import computeCode from './particles.wgsl?raw';
 import renderCode from './render.wgsl?raw';
 import postCode from './post-shader.wgsl?raw';
+import accretionCode from './accretion.wgsl?raw';
 import volumeCode from './volume.wgsl?raw';
 import referenceSimulation from './reference-simulation.wgsl?raw';
 import referenceRenderCode from './reference-render.wgsl?raw';
@@ -18,8 +19,8 @@ const clamp=(v,lo,hi)=>Math.min(hi,Math.max(lo,v));
 export class ParticleEngine {
   constructor(canvas) {
     this.canvas=canvas; this.capacity=MAX_PARTICLES; this.count=131072; this.palette=0; this.burst=[0,0,0,1]; this.time=0; this.data=new Float32Array(UNIFORM_FLOATS);
-    this.effect=0; // 0 orbital, 1 ribbons, 2 wave, 3 angular paths
-    this.persistent=false; this.flowMode=0; this.lastMode=0; this.musicActive=false;
+    this.effect=0; // 0 orbital, 1 ribbons, 2 wave, 3 angular paths, 4 accretion disk
+    this.persistent=false; this.flowMode=0; this.lastMode=0; this.lastEffect=0; this.musicActive=false;
     this.fill=0; // 0 centred between intro and panel, 1 fills the scene (exhibition mode)
     this.exposure=.8; this.bloom=.06; this.trail=.035; this.renderScale=1; this.resolution='native';
     this.pending=[]; this.serial=0; this.served=0; this.tracked=[]; this.clock=0; this.lastCount=0; this.signature='';
@@ -63,7 +64,7 @@ export class ParticleEngine {
     this.density=device.createBuffer({size:128*128*16,usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});
     this.sampler=device.createSampler({magFilter:'linear',minFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
     this.blurDirs=[[1,0],[0,1],[2.4,0],[0,2.4]].map(dir=>{const buffer=device.createBuffer({size:16,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});device.queue.writeBuffer(buffer,0,new Float32Array([...dir,0,0]));return buffer;});
-    const [compute,render,post,volume,referenceRender]=await Promise.all([this.module('particles.wgsl + reference-simulation.wgsl',computeCode+'\n'+referenceSimulation),this.module('render.wgsl',renderCode),this.module('post-shader.wgsl',postCode),this.module('volume.wgsl',volumeCode),this.module('reference-render.wgsl',referenceRenderCode)]);
+    const [compute,render,post,volume,referenceRender]=await Promise.all([this.module('particle simulation',computeCode+'\n'+referenceSimulation+'\n'+accretionCode),this.module('render.wgsl',renderCode),this.module('post-shader.wgsl',postCode),this.module('volume.wgsl',volumeCode),this.module('reference-render.wgsl',referenceRenderCode)]);
     const additive={color:{srcFactor:'one',dstFactor:'one',operation:'add'},alpha:{srcFactor:'one',dstFactor:'one',operation:'add'}};
     const screen=(entryPoint,target)=>({layout:'auto',vertex:{module:post,entryPoint:'fullscreenVertex'},fragment:{module:post,entryPoint,targets:[{format:target}]},primitive:{topology:'triangle-list'}});
     [this.compute,this.render,this.fadePipeline,this.downPipeline,this.blurPipeline,this.compositePipeline]=await Promise.all([
@@ -88,7 +89,7 @@ export class ParticleEngine {
   // Compile both editable hooks before replacing either pipeline. The existing
   // bind groups are rebuilt only after success; failed edits leave the live scene intact.
   async compileRemix(source) {
-    const code=remixSources(source,computeCode+'\n'+referenceSimulation,postCode),device=this.device;
+    const code=remixSources(source,computeCode+'\n'+referenceSimulation+'\n'+accretionCode,postCode),device=this.device;
     const lines=source.split('\n').length;
     device.pushErrorScope('validation');
     let nextCompute,nextComposite,failure;
@@ -220,7 +221,7 @@ export class ParticleEngine {
     if (this.appliedScale!==this.renderScale) this.buildTargets();
     const device=this.device,d=this.data;
     const count=clamp(Math.floor(Number(this.count))||131072,1,this.capacity);
-    const effect=clamp(Math.round(Number(this.effect))||0,0,3),fill=clamp(Number(this.fill)||0,0,1);
+    const effect=clamp(Math.round(Number(this.effect))||0,0,4),fill=clamp(Number(this.fill)||0,0,1);
     const real=clamp(Number.isFinite(dt)?dt:1/60,0,.1);
     const tuning=this.modeSettings||{};
     const speed=clamp(Number(tuning.speed)||1,.25,2);
@@ -235,11 +236,13 @@ export class ParticleEngine {
     if (drained.length) this.served=drained[drained.length-1].serial;
     const mode=this.flowMode===1?2:this.flowMode===2?3:this.flowMode===3?SPECTRAL_MODE:this.flowMode===4?5:this.flowMode===5?6:this.flowMode===6?7:this.flowMode===7?8:this.flowMode===8?9:this.persistent?1:0;
     const smoke=mode===SPECTRAL_MODE;
+    const blackHole=mode===0&&effect===4;
     if (smoke&&!this.volumeGroups) this.buildVolumeTargets();
-    const modeChanged=mode!==this.lastMode;
+    const modeChanged=mode!==this.lastMode||(mode===0&&effect!==this.lastEffect&&(effect===4||this.lastEffect===4));
+    this.lastEffect=effect;
     if(modeChanged){this.lastCount=0;this.lastMode=mode;this.dirty=true;}
     const needInit=count>this.lastCount;
-    const signature=`${count}|${this.palette}`;
+    const signature=`${count}|${this.palette}|${effect}`;
     const redraw=!paused||this.dirty||signature!==this.signature;
     const fresh=this.dirty||paused||signature!==this.signature;
     d.fill(0);
@@ -254,7 +257,7 @@ export class ParticleEngine {
     // setting changes direct particle light, independently of the bloom control.
     const particleVisibility=mode<1.5?clamp(Number(tuning.visibility)||1,.25,4):1;
     // Bright hand-fire cores need stronger normalization to retain colour at millions of particles.
-    const densityGain=mode<1.5?Math.max(.38,Math.pow(131072/count,.55)):Math.pow(131072/count,mode===9?.85:.55);
+    const densityGain=blackHole?Math.pow(131072/count,.85):mode<1.5?Math.max(.38,Math.pow(131072/count,.55)):Math.pow(131072/count,mode===9?.85:.55);
     d.set([effect,fill,densityGain*particleVisibility,clamp(real*60,.3,2.5)],144);
     d.set([drained.length,fresh?0:Math.exp(-real/Math.max(.02,Number(this.trail)||.14)),Math.max(0,Number(this.exposure)||0),Math.max(0,Number(this.bloom)||0)],148);
     d.set([mode,this.musicActive?1:0,clamp(Number(this.musicTransient)||0,0,1),clamp(Number(this.audioResponse)||1.2,.3,3)],312);
@@ -297,8 +300,10 @@ export class ParticleEngine {
     if (needInit) encoder.clearBuffer(this.buffer,this.lastCount*PARTICLE_BYTES,(count-this.lastCount)*PARTICLE_BYTES);
     this.lastCount=count;
     if (!paused||needInit) {
-      encoder.clearBuffer(this.density);
-      const bin=encoder.beginComputePass();bin.setPipeline(this.bin);bin.setBindGroup(0,this.binGroup);bin.dispatchWorkgroups(Math.ceil(count/256));bin.end();
+      if(!blackHole){
+        encoder.clearBuffer(this.density);
+        const bin=encoder.beginComputePass();bin.setPipeline(this.bin);bin.setBindGroup(0,this.binGroup);bin.dispatchWorkgroups(Math.ceil(count/256));bin.end();
+      }
       const sim=encoder.beginComputePass();sim.setPipeline(this.compute);sim.setBindGroup(0,this.computeGroup);sim.dispatchWorkgroups(Math.ceil(count/256));sim.end();
       // The volume follows the positions drawn this frame; paused frames reuse the last lit grid.
       if (smoke) {
@@ -311,7 +316,7 @@ export class ParticleEngine {
       const previous=this.sceneIndex,current=1-previous;
       const pass=encoder.beginRenderPass({colorAttachments:[{view:this.sceneViews[current],clearValue:{r:0,g:0,b:0,a:0},loadOp:'clear',storeOp:'store'}]});
       pass.setPipeline(this.fadePipeline);pass.setBindGroup(0,this.fadeGroups[previous]);pass.draw(3);
-      pass.setPipeline(mode>=4?this.referenceRender:this.render);pass.setBindGroup(0,mode>=4?this.referenceRenderGroup:this.renderGroup);pass.draw(4,count);pass.end();
+      pass.setPipeline(mode>=4?this.referenceRender:this.render);pass.setBindGroup(0,mode>=4?this.referenceRenderGroup:this.renderGroup);pass.draw(4,blackHole?count*3:count);pass.end();
       this.sceneIndex=current;this.dirty=false;this.signature=signature;
       this.screenPass(encoder,this.downPipeline,this.downGroups[current],this.glowViews[0]);
       [1,0,1,0].forEach((to,i)=>this.screenPass(encoder,this.blurPipeline,this.blurGroups[i],this.glowViews[to]));

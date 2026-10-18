@@ -42,7 +42,7 @@ export function validateDocument(input){
  const title=text('title',80,true),description=text('description',600),author=text('author',60);
  if(input.version!==VERSION)throw new Error('Unsupported document version.');
  if(!MODES.includes(input.mode))throw new Error('Choose a supported base mode.');
- const settings={};const ranges={palette:[0,6,3],effect:[0,3,0],speed:[.25,2,1],glow:[0,3,1.6],turbulence:[0,3,1.1],emission:[0,3,1.5],visibility:[.25,4,1],count:[32768,524288,131072]};
+ const settings={};const ranges={palette:[0,6,3],effect:[0,4,0],speed:[.25,2,1],glow:[0,3,1.6],turbulence:[0,3,1.1],emission:[0,3,1.5],visibility:[.25,4,1],count:[32768,524288,131072]};
  for(const [key,[lo,hi,fallback]] of Object.entries(ranges)){const n=input.settings?.[key]??fallback;if(!Number.isFinite(n)||n<lo||n>hi)throw new Error(`${key} must be between ${lo} and ${hi}.`);if(['palette','effect','count'].includes(key)&&!Number.isInteger(n))throw new Error(`${key} must be an integer.`);settings[key]=n;}
  const code=validateCode(input.code);
  return {version:VERSION,title,description,author,mode:input.mode,settings,code};

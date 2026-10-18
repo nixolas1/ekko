@@ -24,10 +24,10 @@ test('shader surface excludes unbounded execution, bindings, globals and cross-h
  for(const code of [DEFAULT_CODE+'\nvar secret: f32;',DEFAULT_CODE.replace('return rgb;','loop { } return rgb;'),DEFAULT_CODE.replace('return rgb;','return lightRamp(rgb,rgb,rgb,rgb,t);'),DEFAULT_CODE.replace('return rgb;','return params.sound.xyz;'),DEFAULT_CODE.replace('return rgb;','return remixForce(rgb,t,audio,pointer);'),DEFAULT_CODE+'\n@compute fn extra() {}'])assert.throws(()=>validateCode(code));
  assert.doesNotThrow(()=>validateCode(DEFAULT_CODE.replace('return rgb;','if (audio.x > 0.5) { return rgb * 1.2; } return rgb;')));
 });
-test('compiler wraps all three particle stores and final composite only',()=>{
+test('compiler wraps all four particle stores and final composite only',()=>{
  const source=readFileSync('src/particles.wgsl','utf8')+'\n'+readFileSync('src/reference-simulation.wgsl','utf8');
  const post=readFileSync('src/post-shader.wgsl','utf8');const result=remixSources(DEFAULT_CODE,source,post);
- assert.equal((result.compute.match(/particles\[id\] = applyRemix\(/g)||[]).length,3);
+ assert.equal((result.compute.match(/particles\[id\] = applyRemix\(/g)||[]).length,4);
  assert.match(result.post,/clamp\(remixColor/);assert.throws(()=>remixSources(DEFAULT_CODE,source,''));
 });
 test('local drafts preserve unfinished shader code; keys stay out of documents',()=>{

@@ -174,7 +174,7 @@ fn nozzleVelocity(q:vec2f) -> vec2f {
     let sign=select(-1.0,1.0,hand.z>0.0);
     let base=(n*.7+vec2f(-n.y,n.x)*1.15)*sign+params.forceVel[j].xy*.8;
     let desired=gestureFlow(base,delta,radius,params.forceVel[j].xy,params.forceVel[j].zw);
-    v += desired * w * min(abs(hand.z),24.0) * params.clock.y * .65;
+    v += desired * w * min(abs(hand.z),216.0) * params.clock.y * .65;
   }
   for(var j=0u;j<min(u32(params.extra.x),8u);j++) {
     let b=params.bursts[j]; let delta=q-b.xy; let r=length(delta);
@@ -271,7 +271,7 @@ fn facePressure(c:vec2i) -> f32 {
     let wand=params.forceVel[j].z;
     let push=select(0.0,1.0,hand.z<0.0)*(1.0-wand-params.forceVel[j].w);
     let influence=exp(-d*d/(radius*radius));
-    let rate=(1.0-exp(-params.clock.y*min(abs(hand.z),24.0)*1.1))*influence;
+    let rate=(1.0-exp(-params.clock.y*min(abs(hand.z),216.0)*1.1))*influence;
     v=mix(v,n*clamp((d-.018)*10.0,-.25,2.4)+params.forceVel[j].xy*.85,rate*wand);
     v=mix(v,-n*2.0+params.forceVel[j].xy*.5,rate*push);
   }

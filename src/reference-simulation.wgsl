@@ -327,7 +327,7 @@ fn simulateReference(id: u32, old: Particle) -> Particle {
     let dist = length(delta);
     let n = delta / max(dist, 0.001);
     let influence = exp(-dot(delta, delta) / max(f.w * f.w, 0.001));
-    let strength = min(abs(f.z), 24.0);
+    let strength = min(abs(f.z), 216.0);
     var wantedFlow = n * clamp((dist - 0.1) * 4.0, -0.8, 1.4) + vec2f(-n.y, n.x) * 1.2 + params.forceVel[j].xy * 0.65;
     if (f.z < 0.0) { wantedFlow = -n * 2.0 + params.forceVel[j].xy * 0.5; }
     wantedFlow=gestureFlow(wantedFlow,delta,f.w,params.forceVel[j].xy,params.forceVel[j].zw);
@@ -444,7 +444,7 @@ fn simulateHandFire(id: u32, old: Particle) -> Particle {
     var wanted=n*clamp((dist-.1)*4.0,-.8,1.4)+vec2f(-n.y,n.x)*1.2+params.forceVel[j].xy*.65;
     if(f.z<0.0){wanted=-n*2.0+params.forceVel[j].xy*.5;}
     wanted=gestureFlow(wanted,delta,f.w,params.forceVel[j].xy,params.forceVel[j].zw);
-    v=vec3f(mix(v.xy,wanted,1.0-exp(-min(abs(f.z),24.0)*influence*dt*.8)),v.z);
+    v=vec3f(mix(v.xy,wanted,1.0-exp(-min(abs(f.z),216.0)*influence*dt*.8)),v.z);
   }
   var serial=p.velocity.w;
   for(var j=0u;j<min(u32(params.extra.x),8u);j++){

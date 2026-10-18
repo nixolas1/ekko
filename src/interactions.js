@@ -55,20 +55,22 @@ export class HandForces {
       let candidatePalm=depthReset?palm:old?.candidatePalm??palm;
       if(old&&shape.gesture!==candidate){candidate=shape.gesture;since=captured;candidatePalm=palm;}
       if(candidate!==stable&&captured-since>=(FINGER.includes(candidate)?o.enter:o.exit))stable=candidate;
-      // Capture the first observation of a confirmed pointing gesture, rather
-      // than drifting the reference as the hand moves. Brief pose noise keeps it.
-      const pointReference=stable==='point'?(!depthReset&&old?.stable==='point'?old.pointReference:candidatePalm):null;
-      let pointDepthScale=depthReset?1:old?.pointDepthScale??1;
-      if(stable!=='point')pointDepthScale=1;
-      else if(shape.gesture==='point'&&pointReference>.001){
+      // Each gesture starts at its own neutral distance. Brief pose noise keeps
+      // that reference; a confirmed switch or tracking loss resets it.
+      const activeGesture=stable??candidate;
+      const depthGesture=['point','fist','open'].includes(activeGesture)?activeGesture:null;
+      const keepDepth=!depthReset&&depthGesture&&old?.depthGesture===depthGesture;
+      const depthReference=depthGesture?(keepDepth?old.depthReference:candidatePalm):null;
+      let depthScale=keepDepth?old.depthScale:1;
+      if(depthGesture&&shape.gesture===depthGesture&&depthReference>.001){
         // Amplify movement in both directions while keeping the starting size at 1×.
-        const target=clamp((palm/pointReference)**2,.25,4);
-        pointDepthScale+=(target-pointDepthScale)*(1-Math.exp(-dt/.08));
+        const target=clamp((palm/depthReference)**2,.25,4);
+        depthScale+=(target-depthScale)*(1-Math.exp(-dt/.08));
       }
       this.states.set(id,{id,motion,mapPoint,missingAt:null,x,y,rawX:x,rawY:y,vx,vy,open,mode,palmStrength:mode*(12+Math.abs(open-.5)*12),captured,time,
         renderX:old?.renderX??x,renderY:old?.renderY??y,renderAt:old?.renderAt??time,
         vortexTips:shape.gesture==='vortex'?shape.tips:old?.vortexTips||[8,12],fingers:shape.count,candidate,since,stable,vortexRadius,
-        candidatePalm,pointReference,pointDepthScale,
+        candidatePalm,depthGesture,depthReference,depthScale,pointDepthScale:depthGesture==='point'?depthScale:1,
         wandWeight:old?.wandWeight??0,vortexWeight:old?.vortexWeight??0,pointWeight:old?.pointWeight??0,weightAt:old?.weightAt??time});
     });
     for(const [id,state] of this.states)if(!found.has(id)){
@@ -98,7 +100,8 @@ export class HandForces {
       const wand=s.wandWeight,vortex=s.vortexWeight,point=s.pointWeight,rest=Math.max(0,1-wand-vortex-point);
       const finger=FINGER.includes(s.stable),gesture=finger?s.stable:s.stable==='none'?'none':s.mode>0?'pull':'push';
       const palmActive=s.stable==='fist'||s.stable==='open'||!s.stable&&['fist','open'].includes(s.candidate);
-      const strength=(palmActive?s.palmStrength:0)*rest+TARGET.wand*wand+TARGET.vortex*vortex;
+      const palmDepth=['fist','open'].includes(s.depthGesture)?s.depthScale:1;
+      const strength=(palmActive?s.palmStrength*palmDepth:0)*rest+TARGET.wand*wand+TARGET.vortex*vortex;
       result.push({...s,x:s.renderX+point*(pointAnchor[0]-palm[0])+wand*((thumb[0]+pointAnchor[0])/2-palm[0])+vortex*((va[0]+vb[0])/2-palm[0]),y:s.renderY+point*(pointAnchor[1]-palm[1])+wand*((thumb[1]+pointAnchor[1])/2-palm[1])+vortex*((va[1]+vb[1])/2-palm[1]),
         emitDirection,mode:finger?Math.sign(TARGET[gesture]):s.mode,gesture,wand,vortex,point:point*fade,vortexRadius:s.vortexRadius,
         strength:strength*fade});
