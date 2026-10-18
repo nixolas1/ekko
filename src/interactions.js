@@ -1,15 +1,11 @@
 import { openness, fingerGesture } from './gestures.js';
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
-const FINGER=['wand','vortex','shockwave'];
+const FINGER=['point','wand','vortex'];
 // Signed force of each finger gesture; fist/open palm keep the openness-scaled 12..18.
-const TARGET={wand:14,vortex:16,shockwave:-18};
+const TARGET={point:0,wand:14,vortex:16};
 const DEFAULTS={
-  enter:180,            // ms a one/two/three-finger count must hold before its gesture starts
-  exit:100,             // ms a fist/open palm must hold to leave a finger gesture
-  cooldown:400,         // ms between shockwave bursts of one hand (re-arming also needs a held gesture)
-  reacquire:1000,       // ms after a hand was last seen in shockwave during which a reacquired hand cannot burst
-  reacquireDistance:.35,// world units around that spot (covers identity churn)
-  burstStrength:1.2,
+  enter:180,            // ms a point, pinch or vortex must hold before activation
+  exit:100,             // ms to leave a finger gesture
   weightTau:.03,        // s; gesture weights settle in ~100 ms
 };
 // Stable hand identities, adaptive sample filtering and bounded latency compensation.
@@ -18,12 +14,11 @@ const DEFAULTS={
 // the palm, and fingertip anchors are blended on top by gesture weight, so anchor changes
 // never show up as velocity.
 export class HandForces {
-  constructor(options={}){this.options={...DEFAULTS,...options};this.states=new Map();this.current=[];this.seen=0;this.bursts=[];this.memory=new Map();}
+  constructor(options={}){this.options={...DEFAULTS,...options};this.states=new Map();this.current=[];this.seen=0;}
   update(data,time,mapPoint){
     const o=this.options,aspect=data.aspect||1;
     const captured=Number.isFinite(data.timestamp)?Math.min(time,data.timestamp):time;
     const found=new Set();
-    for(const [id,m] of this.memory)if(captured-m.time>=o.reacquire)this.memory.delete(id);
     (data.hands||[]).forEach((hand,index)=>{
       const id=data.handIds?.[index]??index;
       const shape=fingerGesture(hand,aspect);if(!shape)return;
@@ -43,44 +38,26 @@ export class HandForces {
       const mode=open<.38?1:open>.62?-1:(old?.mode??1);
       // Fingertip anchors relative to the raw palm, refreshed only while that count is visible.
       const anchor=1-Math.exp(-dt/.02),tip=i=>mapPoint(hand[i]);
-      let {wandDX=0,wandDY=0,vortexDX=0,vortexDY=0,vortexRadius=.4}=old||{};
-      if(shape.count===1){const [tx,ty]=tip(shape.tips[0]);if(Number.isFinite(tx)&&Number.isFinite(ty)){const a=old?.wandSeen?anchor:1;wandDX+=(tx-x-wandDX)*a;wandDY+=(ty-y-wandDY)*a;}}
-      if(shape.count===2){const [ax,ay]=tip(shape.tips[0]),[bx,by]=tip(shape.tips[1]);if([ax,ay,bx,by].every(Number.isFinite)){
+      let {pointDX=0,pointDY=0,wandDX=0,wandDY=0,vortexDX=0,vortexDY=0,vortexRadius=.4}=old||{};
+      if(shape.gesture==='point'){const [tx,ty]=tip(8);const a=old?.pointSeen?anchor:1;pointDX+=(tx-x-pointDX)*a;pointDY+=(ty-y-pointDY)*a;}
+      if(shape.gesture==='wand'){const [ax,ay]=tip(4),[bx,by]=tip(8);const a=old?.wandSeen?anchor:1;wandDX+=((ax+bx)/2-x-wandDX)*a;wandDY+=((ay+by)/2-y-wandDY)*a;}
+      if(shape.gesture==='vortex'){const [ax,ay]=tip(shape.tips[0]),[bx,by]=tip(shape.tips[1]);if([ax,ay,bx,by].every(Number.isFinite)){
         const a=old?.vortexSeen?anchor:1,radius=clamp(Math.hypot(ax-bx,ay-by)*1.8,.22,.8);
         vortexDX+=((ax+bx)/2-x-vortexDX)*a;vortexDY+=((ay+by)/2-y-vortexDY)*a;vortexRadius+=(radius-vortexRadius)*(old?.vortexSeen?1-Math.exp(-dt/.05):1);}}
-      // Debounce: a raw class becomes the stable gesture only after holding steadily.
-      // `armed` allows one shockwave burst; it is set by a held fist/wand/vortex (raising
-      // three fingers), not by an open palm (a flaky pinky), and is consumed by the burst.
-      let {candidate=shape.gesture,since=captured,stable=null,lastBurst=-Infinity}=old||{};
-      let armed=old?old.armed:!this.#recentShock(id,x,y,captured,time);
+      // Debounce per hand; unsupported poses settle to no force.
+      let {candidate=shape.gesture,since=captured,stable=null}=old||{};
       if(old&&shape.gesture!==candidate){candidate=shape.gesture;since=captured;}
-      const held=captured-since;
-      if(candidate!==stable&&held>=(FINGER.includes(candidate)?o.enter:o.exit)){
-        if(candidate==='shockwave'&&armed&&captured-lastBurst>=o.cooldown){this.bursts.push({x,y,id,strength:o.burstStrength});lastBurst=captured;}
-        if(candidate==='shockwave')armed=false;
-        stable=candidate;
-      }
-      if(stable==='open')armed=false;
-      else if(stable&&stable!=='shockwave'&&candidate===stable&&held>=o.enter)armed=true;
-      if(stable==='shockwave')this.memory.set(id,{x,y,time:captured});
+      if(candidate!==stable&&captured-since>=(FINGER.includes(candidate)?o.enter:o.exit))stable=candidate;
       this.states.set(id,{id,x:px,y:py,rawX:x,rawY:y,vx,vy,open,mode,palmStrength:mode*(12+Math.abs(open-.5)*12),captured,time,
         renderX:old?.renderX??px,renderY:old?.renderY??py,renderAt:old?.renderAt??time,
-        fingers:shape.count,candidate,since,stable,armed,lastBurst,wandDX,wandDY,vortexDX,vortexDY,vortexRadius,
-        wandSeen:old?.wandSeen||shape.count===1,vortexSeen:old?.vortexSeen||shape.count===2,
-        wandWeight:old?.wandWeight??0,vortexWeight:old?.vortexWeight??0,shockwaveWeight:old?.shockwaveWeight??0,weightAt:old?.weightAt??time});
+        fingers:shape.count,candidate,since,stable,pointDX,pointDY,wandDX,wandDY,vortexDX,vortexDY,vortexRadius,
+        pointSeen:old?.pointSeen||shape.gesture==='point',wandSeen:old?.wandSeen||shape.gesture==='wand',vortexSeen:old?.vortexSeen||shape.gesture==='vortex',
+        wandWeight:old?.wandWeight??0,vortexWeight:old?.vortexWeight??0,pointWeight:old?.pointWeight??0,weightAt:old?.weightAt??time});
     });
     for(const [id,state] of this.states)if(!found.has(id)&&time-state.time>120)this.states.delete(id);
     this.seen=time;this.current=[...found].map(id=>this.states.get(id)).filter(Boolean);
     for(const [id,state] of this.states)if(!found.has(id))this.current.push(state);
     return this.current;
-  }
-  // A newly created hand state near (or with the id of) a hand recently held in shockwave is
-  // an occlusion/reacquire, not a deliberate raise. A different hand that is still tracked
-  // is not churn, so a second hand raised beside it can still burst.
-  #recentShock(id,x,y,captured,time){
-    const live=key=>time-(this.states.get(key)?.time??-Infinity)<=120;
-    for(const [key,m] of this.memory)if(captured-m.time<this.options.reacquire&&(key===id||!live(key)&&Math.hypot(m.x-x,m.y-y)<this.options.reacquireDistance))return true;
-    return false;
   }
   sample(time){
     const result=[];
@@ -96,16 +73,24 @@ export class HandForces {
       // Each weight approaches 1 (active gesture) or 0, so their sum never exceeds 1.
       const k=1-Math.exp(-Math.max(0,time-s.weightAt)/1000/this.options.weightTau);s.weightAt=Math.max(s.weightAt,time);
       for(const g of FINGER)s[g+'Weight']+=((s.stable===g?1:0)-s[g+'Weight'])*k;
-      const wand=s.wandWeight,vortex=s.vortexWeight,shockwave=s.shockwaveWeight,rest=Math.max(0,1-wand-vortex-shockwave);
-      const finger=FINGER.includes(s.stable),gesture=finger?s.stable:s.mode>0?'pull':'push';
-      const strength=s.palmStrength*rest+TARGET.wand*wand+TARGET.vortex*vortex+TARGET.shockwave*shockwave;
-      result.push({...s,x:s.renderX+wand*s.wandDX+vortex*s.vortexDX,y:s.renderY+wand*s.wandDY+vortex*s.vortexDY,
-        mode:finger?Math.sign(TARGET[gesture]):s.mode,gesture,wand,vortex,shockwave,vortexRadius:s.vortexRadius,
+      const wand=s.wandWeight,vortex=s.vortexWeight,point=s.pointWeight,rest=Math.max(0,1-wand-vortex-point);
+      const finger=FINGER.includes(s.stable),gesture=finger?s.stable:s.stable==='none'?'none':s.mode>0?'pull':'push';
+      const palmActive=s.stable==='fist'||s.stable==='open'||!s.stable&&['fist','open'].includes(s.candidate);
+      const strength=(palmActive?s.palmStrength:0)*rest+TARGET.wand*wand+TARGET.vortex*vortex;
+      result.push({...s,x:s.renderX+point*s.pointDX+wand*s.wandDX+vortex*s.vortexDX,y:s.renderY+point*s.pointDY+wand*s.wandDY+vortex*s.vortexDY,
+        mode:finger?Math.sign(TARGET[gesture]):s.mode,gesture,wand,vortex,point:point*clamp((300-age)/125,0,1),vortexRadius:s.vortexRadius,
         strength:strength*clamp((300-age)/125,0,1)});
     }
     return result;
   }
-  // World-space shockwave entries since the last call, each delivered exactly once.
-  drainBursts(){const bursts=this.bursts;this.bursts=[];return bursts;}
-  clear(){this.states.clear();this.current=[];this.seen=0;this.bursts=[];this.memory.clear();}
+  clear(){this.states.clear();this.current=[];this.seen=0;}
+}
+
+// Negative radius marks a cursor obstacle in the shared GPU force buffer.
+// Each pointing hand gets its own obstacle, independent of the mouse cursor.
+export function handForce(hand,persistent,pullPower,pushPower){
+  if(hand.gesture==='point')return [hand.x,hand.y,(hand.point||0)*pushPower,-.18,0,0,hand.id,0,0];
+  const wand=hand.wand||0,vortex=hand.vortex||0;
+  const radius=(persistent?.95:.65)*Math.max(0,1-wand-vortex)+.22*wand+(hand.vortexRadius||.35)*vortex;
+  return [hand.x,hand.y,hand.strength*(hand.strength<0?pushPower:pullPower),radius,wand,vortex,hand.id,hand.vx,hand.vy];
 }

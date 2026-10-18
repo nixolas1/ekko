@@ -6,7 +6,7 @@ import {createShowcaseScore} from './showcase-music';
 import { ParticleEngine } from './gpu';
 import { AudioInput } from './audio';
 import { Tracking } from './tracking';
-import { HandForces } from './interactions';
+import { HandForces, handForce } from './interactions';
 import { HandOverlay } from './hand-overlay';
 import { mouseHandForce } from './mouse-hand';
 import {forceFromSlider,sliderFromForce} from './force-controls';
@@ -48,13 +48,12 @@ function persist(){
 const handMarkers=Array.from({length:8},()=>{const node=document.createElement('div');node.className='hand-marker';node.hidden=true;node.innerHTML='<span></span>';$('hand-indicators').append(node);return node;});
 const bars=Array.from({length:4},()=>{const bar=document.createElement('i');$('spectrum').append(bar);return bar;});
 function mapPoint(p){const aspect=innerWidth/innerHeight,cameraAspect=($('camera').videoWidth||640)/($('camera').videoHeight||480);return [(1-2*p.x)*Math.min(aspect,cameraAspect),(1-2*p.y)*Math.min(1,aspect/cameraAspect)];}
-const gestureLabels={wand:'Wand',vortex:'Vortex',shockwave:'Shockwave',pull:'Gather',push:'Push'};
+const gestureLabels={point:'Cursor',wand:'Pinch · Wand',vortex:'Vortex',none:'No gesture',pull:'Gather',push:'Push'};
 const tracker=new Tracking($('camera'),data=>{
   if(showcaseSnapshot)return; // Real camera data never drives a simulated demonstration.
   trackingData=data;trackingTime=performance.now();handForces.update(data,trackingTime,mapPoint);
   $('camera-count').textContent=`${data.hands.length} hands`;
   for(const point of data.bursts){const [x,y]=mapPoint(point);engine.explode(x,y);}
-  for(const point of handForces.drainBursts())engine.explode(point.x,point.y,point.strength*pushPower);
   handOverlay.update(data,handForces.states,trackingTime);
   drawSkeleton(data);
 },status=>{ $('tracking-status').textContent=status;if(status.startsWith('Tracking stopped')){resetCamera();notice(status);} },{maxHands:settings.maxHands});
@@ -437,16 +436,12 @@ function frame(now){
     const pointer=demo.pointer;engine.mouse=pointer&&!pointer.held?[pointer.x,pointer.y,.18,1]:[0,0,.18,0];
   }
   const hands=demo?demo.hands:tracker.active?handForces.sample(now):[];
-  handMarkers.forEach((node,index)=>{const hand=hands[index];node.hidden=!hand;if(hand){node.style.left=`${(hand.x/(innerWidth/innerHeight)+1)*50}%`;node.style.top=`${(1-hand.y)*50}%`;node.classList.toggle('repel',hand.mode<0);node.firstChild.textContent=hand.mode<0?'Push':'Pull';}});
+  handMarkers.forEach((node,index)=>{const hand=hands[index];node.hidden=!hand;if(hand){node.style.left=`${(hand.x/(innerWidth/innerHeight)+1)*50}%`;node.style.top=`${(1-hand.y)*50}%`;node.classList.toggle('repel',hand.mode<0);node.firstChild.textContent=gestureLabels[hand.gesture]||'Gather';}});
   const activeSound=showcase.active?showcaseSource||showcaseSound:sound;
   engine.musicActive=activeSound.mode==='mic'||activeSound.mode==='tab'||(activeSound.mode==='file'&&!!activeSound.element&&!activeSound.element.paused);
   const audio=activeSound.sample(now/1000);engine.audioResponse=activeSound.gain;engine.musicTransient=activeSound.transient;engine.emissionBands=activeSound.emissionBands;engine.ringBands=activeSound.ringSpectrum.levels;engine.ringAttacks=activeSound.ringSpectrum.attacks;audio[3]=Math.max(audio[3],activeSound.transient*.8);
   // Hand pull/push is separate from the mouse obstacle; body joints never attract.
-  const forces=hands.map(hand=>{
-    const wand=hand.wand||0,vortex=hand.vortex||0,shock=hand.shockwave||0;
-    const radius=(engine.persistent?.95:.65)*Math.max(0,1-wand-vortex-shock)+.22*wand+(hand.vortexRadius||.35)*vortex+shock;
-    return [hand.x,hand.y,hand.strength*(hand.strength<0?pushPower:pullPower),radius,wand,vortex,hand.id,hand.vx,hand.vy];
-  });
+  const forces=hands.map(hand=>handForce(hand,engine.persistent,pullPower,pushPower));
   const mouseForce=mouseHandForce(demo?demo.pointer:mouseHand,engine.persistent,pullPower,pushPower);if(mouseForce)forces.push(mouseForce);
   const scenePaused=showcase.active?(showcase.paused||showcase.complete||showcaseStarting):paused;
   if(autoCount&&!scenePaused&&!['smoke','fluid-ring'].includes(physicsMode)){const quality=adaptiveQuality.update(dt,engine.count,engine.renderScale,tracker.active&&tracker.backend==='GPU'?tracker.ms:0);if(quality){engine.count=quality.count;engine.renderScale=engine.resolution==='auto'?quality.scale:1;countUI();}}

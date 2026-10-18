@@ -1,7 +1,7 @@
 import {extendedFingers} from './gestures.js';
 
 const EDGES=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
-const POWERS={wand:['Wand','#e6faff'],vortex:['Vortex','#c2abff'],shockwave:['Shockwave','#ffb77e'],pull:['Gather','#8be7ed'],push:['Push','#f2cf91']};
+const POWERS={point:['Cursor','#bceefa'],none:['No gesture','#a1a8bd'],wand:['Pinch · Wand','#e6faff'],vortex:['Vortex','#c2abff'],pull:['Gather','#8be7ed'],push:['Push','#f2cf91']};
 // A separate, transparent camera-landmark view for presentations. It uses the
 // existing tracking results, never another camera stream or inference pass.
 export class HandOverlay {
@@ -62,7 +62,7 @@ export class HandOverlay {
       ctx.beginPath();for(const [a,b] of EDGES){ctx.moveTo(...xy(points[a]));ctx.lineTo(...xy(points[b]));}
       ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle=color;ctx.lineWidth=2;ctx.shadowColor=color;ctx.shadowBlur=7;ctx.stroke();ctx.shadowBlur=0;
       points.forEach((p,i)=>{
-        const tip=[8,12,16,20].indexOf(i),active=tip>=0&&hand.fingers[tip];
+        const tip=[8,12,16,20].indexOf(i),active=hand.gesture==='wand'?(i===4||i===8):tip>=0&&hand.fingers[tip];
         ctx.beginPath();ctx.arc(...xy(p),active?3.4:i===0?3:1.8,0,Math.PI*2);
         ctx.fillStyle=active?'#f6fbff':color;ctx.fill();
         if(active){ctx.beginPath();ctx.arc(...xy(p),5.8,0,Math.PI*2);ctx.strokeStyle=color+'70';ctx.lineWidth=1;ctx.stroke();}

@@ -163,7 +163,7 @@ fn nozzleVelocity(q:vec2f) -> vec2f {
   if(ringMode()){v+=nozzleVelocity(q)*params.clock.y;}
   else {v += (vec2f(.16*sin(params.clock.x*1.9+q.x*19.0),.35)*src.a+laneJet(q))*params.clock.y;}
   for(var j=0u;j<min(u32(params.display.w),32u);j++) {
-    let hand=params.forces[j]; let delta=hand.xy-q;
+    let hand=params.forces[j];if(hand.w<0.0){continue;} let delta=hand.xy-q;
     let radius=max(hand.w,.05); let d=length(delta);
     let n=delta/max(d,.001); let w=exp(-dot(delta,delta)/(radius*radius));
     // Circulation and hand motion survive incompressibility projection; a purely
@@ -249,7 +249,7 @@ fn nozzleVelocity(q:vec2f) -> vec2f {
   // Magical suction/push must survive the pressure solve, which otherwise
   // cancels radial forces. Apply bounded local drift just like the mouse obstacle.
   for(var j=0u;j<min(u32(params.display.w),32u);j++){
-    let hand=params.forces[j];let delta=hand.xy-q;let d=length(delta);
+    let hand=params.forces[j];if(hand.w<0.0){continue;}let delta=hand.xy-q;let d=length(delta);
     let radius=max(hand.w,.05);let n=delta/max(d,.001);
     let wand=params.forceVel[j].z;
     let push=select(0.0,1.0,hand.z<0.0)*(1.0-wand-params.forceVel[j].w);
@@ -262,7 +262,7 @@ fn nozzleVelocity(q:vec2f) -> vec2f {
     let b=params.bursts[j];let delta=q-b.xy;let r=length(delta);
     v+=delta/max(r,.02)*exp(-r*r/.18)*b.w*1.2;
   }
-  v=mouseVelocity(q,v,params.mouse,params.clock.y);
+  v=cursorVelocity(q,v,params.clock.y);
   textureStore(result,c,vec4f(clamp(v,vec2f(-3),vec2f(3)),0,0));
 }
 fn dye(q: vec2f) -> vec4f {
@@ -341,7 +341,7 @@ fn dye(q: vec2f) -> vec4f {
     p.position=vec4f(q,(rnd(key,86u)-.5)*.035,select(0.0,clamp(ringLevel(band)*.8+ringAttack(band)*.7,0.0,1.5),params.simulation.y>.5));
     p.extra.y=0.0;
   }
-  let q=p.position.xy;let v=mouseVelocity(q,velAt(q+velAt(q)*dt*.5),params.mouse,dt);
+  let q=p.position.xy;let v=cursorVelocity(q,velAt(q+velAt(q)*dt*.5),dt);
   p.position=vec4f(q+v*dt,p.position.z,p.position.w);
   p.velocity=vec4f(v,0,0);p.extra.y+=dt;
   if(p.extra.y>life || any(abs(p.position.xy)>worldSize()*.51) || length(p.position.xy)<ringRadius()*.65){p.extra.y=-.001;}

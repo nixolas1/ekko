@@ -14,7 +14,7 @@ EKKO is an interactive music visualizer built with WebGPU. Bass launches jets of
 
 Choose **Take the tour** in the header for a three-minute journey through all nine modes. An original instrumental loop, *First light*, plays through the same audio analyser as your own music. If you already have a song loaded or a live input connected, the tour uses that source instead. No audio library download is needed for the built-in score.
 
-Animated hand skeletons demonstrate Wand, Vortex, Gather, Push and Shockwave. A simulated cursor demonstrates hover, click-and-hold, and Command-click gathering. The drawings and the simulation share the same positions: you see the controls that are actually affecting the smoke and particles. Camera tracking does not influence the tour.
+Animated hand skeletons demonstrate pointing, pinch-to-Wand, Vortex, Gather and Push. A simulated cursor demonstrates hover, click-and-hold, and Command-click gathering. The drawings and the simulation share the same positions: you see the controls that are actually affecting the smoke and particles. Camera tracking does not influence the tour.
 
 - **Back / Next** or the nine chapter markers jump between scenes.
 - **Pause / Resume** freezes the demonstration and pauses file playback. Live audio keeps playing in its source. Switching away from the tab pauses the tour.
@@ -25,7 +25,7 @@ Animated hand skeletons demonstrate Wand, Vortex, Gather, Push and Shockwave. A 
 
 The tour uses the real WebGPU renderer, with automatic particle quality adjustment. Its controls are simulated and labelled; it cannot replace practising with your own hands or mouse. You can run it without allowing camera access.
 
-![Guided tour demonstrating the Wand gesture in rainbow smoke](docs/images/guided-tour.jpg)
+![Guided tour demonstrating the pinch-to-Wand gesture in rainbow smoke](docs/images/guided-tour.jpg)
 
 *The tour uses live audio-reactive rendering; the labelled hand shows the force moving the ribbons.*
 
@@ -74,13 +74,16 @@ Camera tracking turns hand landmarks into forces in the simulation. The preview 
 
 | Gesture | Action |
 | --- | --- |
-| Raise your index finger | **Wand:** gather light into a small moving core. |
+| Raise your index finger | **Cursor:** gently repel nearby particles and smoke at your fingertip, just like hovering the mouse. |
+| Pinch thumb and index fingertips together | **Wand:** gather light into a small moving core at the pinch. |
 | Raise index and middle fingers | **Vortex:** stir an orbit. Spread the fingertips to widen it. |
-| Add your ring finger | **Shockwave:** release a burst. |
 | Close your hand | **Gather:** pull particles into orbit. |
 | Open your palm | **Push:** repel the scene. Opening a closed hand also triggers a burst. |
 
-Hold finger gestures briefly to switch powers; thumbs are ignored. **Hand force** adjusts pull and push together, with fine control at low strengths. Choose tracking for **2, 4 or 8 hands** to let more people join in; two hands has the lowest tracking load.
+Hold gestures briefly to switch powers. Pinching works with the other fingers raised or curled. Three raised fingers have no special effect. **Hand force** adjusts pull and push together, with fine control at low strengths. Choose tracking for **2, 4 or 8 hands** to let more people join in; two hands has the lowest tracking load.
+
+![Guided tour showing a pointing finger gently parting the light shapes](docs/images/pointing-cursor.jpg)
+
 
 The app attempts to start the camera after WebGPU initialises, subject to browser permission. Use **Stop camera / Enable camera** in Movement to control it. The **Show hands** checkbox only controls the overlay. You can use the mouse and music without a camera.
 
@@ -248,6 +251,8 @@ Start with [common-shader.wgsl](src/common-shader.wgsl) for the shared layout an
 | [tests/](tests/) | Node tests, browser interaction tests and actual GPU checks. |
 
 `node tests/showcase.browser.mjs` and `node tests/showcase-audio.browser.mjs` check the guided tour in Chrome against a local dev server at port 5173 (override with `EKKO_TEST_URL`). They exercise all nine GPU modes, simulated input, playback, pause/replay, restoration and the mobile layout.
+
+`node tests/hand-powers.browser.mjs` checks real GPU readback in all nine modes, including matching pointing-finger repulsion to the mouse obstacle. It also checks Wand, Vortex, Push and palm bursts (same `EKKO_TEST_URL` override).
 
 `npm test` runs the Node suite, including mathematical models and mock WebGPU scheduling checks. It does **not** execute the shaders on a GPU. For real GPU checks, serve the app and open the relevant fixture:
 

@@ -17,15 +17,15 @@ test('pause, invalid time, stop and hidden-tab gaps cannot advance a lesson unex
  tour.paused=false;tour.advance(NaN);tour.advance(-1);assert.equal(tour.elapsed,0);
  tour.advance(30);assert.equal(tour.elapsed,.1);tour.stop();tour.advance(.1);assert.equal(tour.elapsed,.1);
 });
-test('gather release and shockwave fire once per crossing, including after replay',()=>{
+test('gather releases fire once per crossing, including after replay',()=>{
  const tour=new ShowcaseTimeline();tour.start();
- for(const [index,time] of [[3,10],[8,9]]){
+ for(const [index,time] of [[3,10]]){
   tour.seek(index);tour.elapsed=time-.04;assert.equal(tour.advance(.05).bursts.length,1);assert.equal(tour.advance(.05).bursts.length,0);
   tour.seek(index);tour.elapsed=time-.04;assert.equal(tour.advance(.05).bursts.length,1);
  }
 });
 test('teaching poses are classified as the gestures they demonstrate',()=>{
- for(const [name,expected] of Object.entries({gather:'fist',push:'open',wand:'wand',vortex:'vortex',shockwave:'shockwave'})){
+ for(const [name,expected] of Object.entries({gather:'fist',push:'open',wand:'wand',vortex:'vortex',point:'point'})){
   assert.equal(fingerGesture(showcaseHandPose(name)).gesture,expected,name);
  }
 });

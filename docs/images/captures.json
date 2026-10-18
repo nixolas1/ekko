@@ -42,7 +42,8 @@
     {
       "file": "controls.jpg",
       "mode": "Smoke light \u00b7 original",
-      "setup": "Same session and settings as smoke-light.jpg; captured after 24 seconds of playback, then H to reveal controls."
+      "setup": "Smoke light Original, rainbow palette, 262144 particles, silent demo. Close Visual mode, Music and Light to show the updated Movement guide.",
+      "audio": "Silent demo; no audio input"
     }
   ],
   "guidedTour": {
@@ -54,7 +55,7 @@
     "format": "JPEG screenshot, quality 92, no post-processing",
     "mode": "Smoke light \u00b7 Original",
     "audio": "Built-in generated score: First light",
-    "recreate": "Start Take the tour, choose chapter 2, and let it run for about 4 seconds. Simulated Wand controls and automatic particle quality are active."
+    "recreate": "Start Take the tour, choose chapter 2, and let it run for about 5 seconds. Simulated thumb-index pinch controls Wand; automatic particle quality is active."
   },
   "remixTemplates": {
     "files": [
@@ -71,5 +72,16 @@
     "capture": "Live preview canvas only; JPEG quality 90, no post-processing",
     "audio": "Built-in generated score: First light",
     "recreate": "Open /remix/edit/?template=<mode>, Run scene, Play demo music, wait about 6.5 seconds. Settings and WGSL are in src/remix/templates.js. Exact simulation frames vary."
+  },
+  "pointingCursor": {
+    "file": "pointing-cursor.jpg",
+    "viewport": [
+      1440,
+      900
+    ],
+    "format": "JPEG screenshot, quality 92, no post-processing",
+    "mode": "Light shapes",
+    "audio": "Built-in generated score: First light",
+    "recreate": "Start Take the tour, choose chapter 9, and let it run for about 4 seconds. The simulated index finger is a cursor obstacle."
   }
 }

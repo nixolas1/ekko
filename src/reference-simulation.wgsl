@@ -314,6 +314,7 @@ fn simulateReference(id: u32, old: Particle) -> Particle {
   // both drag the smoke along with their motion.
   for (var j = 0u; j < min(u32(params.display.w), 32u); j++) {
     let f = params.forces[j];
+    if(f.w<0.0){continue;}
     let delta = f.xy - q.xy;
     let dist = length(delta);
     let n = delta / max(dist, 0.001);
@@ -344,7 +345,7 @@ fn simulateReference(id: u32, old: Particle) -> Particle {
   // so hand motion does not permanently replace the underlying plume/vortex.
   impulse *= min(1.0, 3.0 / max(length(impulse), 0.001));
   v = flowV + impulse;
-  v=vec3f(mouseVelocity(q.xy,v.xy,params.mouse,dt),v.z);
+  v=vec3f(cursorVelocity(q.xy,v.xy,dt),v.z);
   q += v * dt * (0.85 + clamp(params.sound.w, 0.0, 1.0) * 0.6);
   var w = p.position.w;
   if ((mode > 5.5 && mode < 6.5)) {

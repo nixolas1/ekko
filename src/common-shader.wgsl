@@ -27,7 +27,7 @@ struct Parameters {
   sound: vec4f,   // bass, mid, high, energy
   display: vec4f, // palette, scene pixel width, scene pixel height, force count
   burst: vec4f,   // latest burst x, y, serial after this frame's drain, serial before it
-  forces: array<vec4f, 32>, // x, y, strength, radius
+  forces: array<vec4f, 32>, // x, y, strength, radius (negative radius = cursor obstacle)
   style: vec4f,   // effect, fill, brightness gain, frame scale
   extra: vec4f,   // bursts drained this frame, trail decay, exposure, bloom strength
   bursts: array<vec4f, 8>,  // x, y, serial, strength
@@ -101,6 +101,16 @@ fn mouseVelocity(q:vec2f,v:vec2f,mouse:vec4f,dt:f32)->vec2f {
   let n=select(vec2f(1,0),delta/max(distance,.00001),distance>.00001);
   let falloff=pow(1.0-distance/radius,2.0);
   return v+n*max(0.0,2.4*falloff-dot(v,n))*(1.0-exp(-dt*35.0));
+}
+
+// Apply the mouse and all pointing fingertips with the same compact response.
+fn cursorVelocity(q:vec2f,velocity:vec2f,dt:f32)->vec2f {
+  var v=mouseVelocity(q,velocity,params.mouse,dt);
+  for(var j=0u;j<min(u32(params.display.w),32u);j++){
+    let f=params.forces[j];
+    if(f.w<0.0 && f.z>0.0){v=mouseVelocity(q,v,vec4f(f.xy,-f.w,1.0),dt*f.z);}
+  }
+  return v;
 }
 
 // Continuous gesture blending, shared by all particle and fluid modes. A wand

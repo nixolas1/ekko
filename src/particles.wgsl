@@ -313,6 +313,7 @@ fn simulateSmoke(id: u32, old: Particle) -> Particle {
   var heat = p.state.y * exp(-dt * 2.0);
   for (var j = 0u; j < min(u32(params.display.w), 32u); j++) {
     let f = params.forces[j];
+    if(f.w<0.0){continue;}
     let delta = f.xy - q.xy;
     let dist = length(delta);
     let n = delta / max(dist, 0.001);
@@ -337,7 +338,7 @@ fn simulateSmoke(id: u32, old: Particle) -> Particle {
   // Weak density pressure preserves wisps while keeping coincident particles apart.
   v += vec3f(separation(q.xy, id) * dt * 0.035, 0.0);
   v *= min(1.0, 3.5 / max(length(v), 0.001));
-  v=vec3f(mouseVelocity(q.xy,v.xy,params.mouse,dt),v.z);
+  v=vec3f(cursorVelocity(q.xy,v.xy,dt),v.z);
   q += v * dt * (0.8 + energy * 0.65);
   // The spectral ring recycles at one radius, so wide screens do not stretch the side sectors thin.
   let escaped = abs(q.x) > params.clock.z * 1.2 || abs(q.y) > 1.3 || (spectral && length(q.xy) > 1.3);
@@ -444,6 +445,7 @@ fn simulate(@builtin(global_invocation_id) gid: vec3u) {
     var cum = 0.0;
     for (var j = 0u; j < nf; j++) {
       let f = params.forces[j];
+      if(f.w<0.0){continue;}
       let pj = clamp(abs(f.z), 0.0, 24.0) * 260.0 * scale * (0.15 + bass * 2.1 + energy * 0.8);
       if (x >= cum && x < cum + pj) {
         let a = rnd(key, 16u) * TAU;
@@ -483,6 +485,7 @@ fn simulate(@builtin(global_invocation_id) gid: vec3u) {
   // springs, moving targets and position integration still need bounded steps.
   for (var j = 0u; j < nf; j++) {
     let f = params.forces[j];
+    if(f.w<0.0){continue;}
     if (abs(f.z) < 0.001) { continue; }
     let d = f.xy - q.xy;
     let dd2 = dot(d, d);
@@ -511,7 +514,7 @@ fn simulate(@builtin(global_invocation_id) gid: vec3u) {
 
   v += vec3f(separation(q.xy, id) * dt, 0.0);
   v *= min(1.0, 5.0 / max(length(v), 0.0001));
-  v=vec3f(mouseVelocity(q.xy,v.xy,params.mouse,dt),v.z);
+  v=vec3f(cursorVelocity(q.xy,v.xy,dt),v.z);
   q += v * dt * musicSpeed;
   if (persistent) {
     let bounds = vec3f(max(aspect * 0.98, 0.2), 0.98, 0.9);

@@ -1,6 +1,6 @@
 import {SHOWCASE_CHAPTERS,showcaseHandPose} from './showcase.js';
 const EDGES=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
-const COLORS={wand:'#e6faff',vortex:'#c2abff',shockwave:'#ffb77e',gather:'#8be7ed',push:'#f2cf91'};
+const COLORS={wand:'#e6faff',vortex:'#c2abff',point:'#bceefa',gather:'#8be7ed',push:'#f2cf91'};
 export class ShowcaseView {
   constructor(onAction){
     this.root=document.createElement('section');this.root.className='showcase';this.root.hidden=true;
@@ -65,14 +65,14 @@ export class ShowcaseView {
     for(const hand of sample.hands){
       const [x,y]=screen(hand.x,hand.y),scale=Math.min(56,w*.075),color=COLORS[hand.gesture];
       const points=showcaseHandPose(hand.gesture,(hand.vortexRadius-.25)/.19);
-      const xy=p=>[x+p.x*scale,y+p.y*scale];
+      const anchor=hand.gesture==='point'?points[8]:hand.gesture==='wand'?{x:(points[4].x+points[8].x)/2,y:(points[4].y+points[8].y)/2}:hand.gesture==='vortex'?{x:(points[8].x+points[12].x)/2,y:(points[8].y+points[12].y)/2}:points[9];
+      const xy=p=>[x+(p.x-anchor.x)*scale,y+(p.y-anchor.y)*scale];
       ctx.beginPath();[0,5,9,13,17].forEach((index,i)=>i?ctx.lineTo(...xy(points[index])):ctx.moveTo(...xy(points[index])));ctx.closePath();ctx.fillStyle='#080a14b8';ctx.fill();
       ctx.beginPath();for(const [a,b] of EDGES){ctx.moveTo(...xy(points[a]));ctx.lineTo(...xy(points[b]));}
       ctx.strokeStyle='#080a14';ctx.lineWidth=6;ctx.stroke();ctx.strokeStyle=color;ctx.lineWidth=2;ctx.stroke();
       for(const p of points){ctx.beginPath();ctx.arc(...xy(p),2.3,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();}
       ctx.beginPath();ctx.arc(x,y,7,0,Math.PI*2);ctx.strokeStyle=color;ctx.lineWidth=1;ctx.stroke();
-      this.label(x,y+scale*.85,`Simulated · ${hand.gesture==='gather'?'Gather':hand.gesture[0].toUpperCase()+hand.gesture.slice(1)}`,color);
-      if(hand.gesture==='shockwave'&&time>=9&&time<10.5){ctx.beginPath();ctx.arc(x,y,20+(time-9)*100,0,Math.PI*2);ctx.strokeStyle=`rgba(255,183,126,${(10.5-time)/1.5})`;ctx.stroke();}
+      this.label(x,y+(points[0].y-anchor.y+.35)*scale,`Simulated · ${hand.gesture==='point'?'Cursor':hand.gesture==='wand'?'Pinch · Wand':hand.gesture==='gather'?'Gather':hand.gesture[0].toUpperCase()+hand.gesture.slice(1)}`,color);
     }
     if(sample.pointer){
       const p=sample.pointer,[x,y]=screen(p.x,p.y);

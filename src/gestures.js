@@ -10,9 +10,9 @@ const finite = p => p && Number.isFinite(p.x) && Number.isFinite(p.y) && (p.z ==
 export const validHand = points => Array.isArray(points) && points.length >= 21 && points.slice(0, 21).every(finite);
 
 // Tips of the long fingers: index, middle, ring, pinky. The thumb is deliberately
-// ignored; its extension reads unreliably from a webcam.
+// excluded from counting; its tip is used separately to detect a pinch.
 export const FINGER_TIPS = [8, 12, 16, 20];
-const FINGER_GESTURES = ['fist', 'wand', 'vortex', 'shockwave', 'open'];
+const FINGER_GESTURES = ['fist', 'point', 'vortex', 'none', 'open'];
 
 // Extended state of [index, middle, ring, pinky], or null for incomplete/non-finite
 // landmarks. A finger is extended when its tip is clearly farther from the wrist than
@@ -30,14 +30,18 @@ export function openness(points, aspect = 1) {
   return fingers ? fingers.filter(Boolean).length / 4 : 0;
 }
 
-// Raw (undebounced) per-frame classification by the number of extended long fingers:
-// 0 fist, 1 wand, 2 vortex, 3 shockwave, 4 open. `tips` are the landmark indices of the
-// extended fingers. Null for unusable landmarks.
+// Pinch wins over finger counts: the other three fingers may be raised or curled.
+// Require the index tip beyond the knuckle region so a tucked thumb in a fist
+// does not become Wand. Distances scale with the palm and camera aspect.
 export function fingerGesture(points, aspect = 1) {
   const fingers = extendedFingers(points, aspect);
   if (!fingers) return null;
   const tips = FINGER_TIPS.filter((_, k) => fingers[k]);
-  return { count: tips.length, tips, gesture: FINGER_GESTURES[tips.length] };
+  const dist = (a, b) => Math.hypot((a.x-b.x)*aspect, a.y-b.y, ((a.z||0)-(b.z||0))*aspect);
+  const palm = Math.max(dist(points[0], points[9]), .001);
+  const pinch = dist(points[4], points[8]) < palm*.28 && dist(points[8], points[0]) > palm*1.1;
+  const gesture = pinch ? 'wand' : tips.length===1 && tips[0]!==8 ? 'none' : FINGER_GESTURES[tips.length];
+  return { count: tips.length, tips, gesture };
 }
 
 // Drops malformed or implausible hands, strips them to plain {x,y,z} (MediaPipe's hand
@@ -86,9 +90,8 @@ export function nextPoseStride(stride, averageMs, slowMs = 65, fastMs = 40) {
 // between frames (globally nearest pairs first), expire lost tracks, and require a
 // closed-to-open transition. Identity is positional only: it does not survive long
 // loss or two hands crossing at the same spot.
-// The palm burst needs all four long fingers: three raised fingers are the shockwave
-// gesture (HandForces). Holding one to three fingers steadily also cancels a fist's
-// arming, so fist -> three fingers -> open palm does not fire twice.
+// Only a closed fist arms the palm burst. Pinching or holding a partial pose
+// disarms it, so releasing a pinch into an open palm cannot create a burst.
 const DEFAULTS = {
   closedMax: .25, openMin: 1, closedFrames: 2, openFrames: 2,
   partialHold: 180,     // ms of a steady one-to-three-finger count that disarms a fist
@@ -138,12 +141,13 @@ export class GestureTracker {
       track.x = wrist.x; track.y = wrist.y; track.seen = time;
 
       // Unusable landmarks keep the identity but count as neither closed nor open.
-      const fingers = extendedFingers(points, aspect), count = fingers ? fingers.filter(Boolean).length : NaN;
-      track.closed = count / 4 <= o.closedMax ? track.closed + 1 : 0;
-      track.open = count / 4 >= o.openMin ? track.open + 1 : 0;
+      const shape = fingerGesture(points, aspect), count = shape?.count ?? NaN;
+      track.closed = shape?.gesture === 'fist' && count / 4 <= o.closedMax ? track.closed + 1 : 0;
+      track.open = shape?.gesture === 'open' && count / 4 >= o.openMin ? track.open + 1 : 0;
       const partial = count > 0 && count < 4;
       if (!partial || count !== track.partial || track.partialSince === null) track.partialSince = partial ? time : null;
       track.partial = count;
+      if (shape?.gesture === 'wand') track.armed = false;
       if (track.closed >= o.closedFrames) { track.armed = true; track.closedAt = time; }
       if (track.armed && time - track.closedAt > o.armTimeout) track.armed = false;
       if (track.armed && partial && time - track.partialSince >= o.partialHold) track.armed = false;
