@@ -1,5 +1,6 @@
-// Local demo music library. Files live in public/audio (git-ignored, local demonstration only; see references/music.md
-// for sources and rights notes). Ids are stable: they are persisted in localStorage, so never rename one.
+// Hosted music library. Files live in public/audio and stay Git-ignored; npm run deploy
+// includes them explicitly. See references/music.md for sources and hosting permission.
+// Ids are stable: they are persisted in localStorage, so never rename one.
 export const LOCAL_TRACKS = Object.freeze([
   { id: 'mitis-endeavors', title: 'Endeavors', artist: 'MitiS', src: '/audio/mitis-endeavors.webm' },
   { id: 'mitis-shattered', title: 'Shattered (feat. RUNN)', artist: 'MitiS', src: '/audio/mitis-shattered.webm' },

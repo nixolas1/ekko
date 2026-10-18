@@ -231,6 +231,12 @@ The API uses yt-dlp with its Deno runtime to import public audio tracks, bounded
 
 The previous production check on **18 October 2026** recorded `503 youtube-blocked` on Vercel for arbitrary imports; known library links reused hosted audio successfully. Treat arbitrary YouTube import as deployment-dependent. Tab audio is another way to analyse a video already playing in your browser without importing its file.
 
+## Deploy the existing site
+
+Run `npm run deploy` from the linked Vercel checkout after committing the changes. It packages the current Git commit and explicitly copies the five library recordings from `public/audio/`. It stops before deployment if any song is missing or empty. Keep the local `.vercel/project.json` link available.
+
+The songs are Git-ignored, so a Git-only archive or Git-triggered build does not include them. After deployment, check all five `/audio/` URLs and browser playback as well as the visualizer.
+
 ## Explore the code
 
 Start with [common-shader.wgsl](src/common-shader.wgsl) for the shared layout and mode map, then follow [gpu.js](src/gpu.js) to see how buffers, bindings and passes connect. The WGSL files contain explanatory comments on the math, optimizations and their tradeoffs.
