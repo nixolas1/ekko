@@ -24,6 +24,7 @@ export const LOCAL_TRACKS = Object.freeze([
   { id: 'deadmau5-kaskade-i-remember', title: 'I Remember', artist: 'deadmau5 & Kaskade', src: '/audio/deadmau5-kaskade-i-remember.webm', youtube: 'zK1mLIeXwsQ' },
   { id: 'marmota-ezir-kara', title: 'Ezir-Kara (骏马黑鹰)', artist: '旱獭乐队', src: '/audio/marmota-ezir-kara.webm', youtube: 'AAuEAYa19K8' },
   { id: 'emma-jensen-somebody-else', title: 'Somebody Else (The 1975 cover, P3 Christine Live)', artist: 'Emma Jensen', src: '/audio/emma-jensen-somebody-else.webm', youtube: 'VxlQG8s24zI' },
+  { id: 'ca7riel-paco-amoroso-fred-again-lo-quiero-ya', title: 'Lo Quiero Ya !', artist: 'CA7RIEL & Paco Amoroso, Fred again..', src: '/audio/ca7riel-paco-amoroso-fred-again-lo-quiero-ya.webm', youtube: 'ZTy_Pnvckns' },
 ].map(Object.freeze));
 // Saved preferences from before the library had a single fixed reference track: that track is Endeavors.
 // Removed ids (country-roads-dance, country-roads-real-hypha) also resolve to it.

@@ -85,3 +85,7 @@ Added at the user’s request using yt-dlp 2026.08.19 with Node, audio-only form
 Emma Jensen’s recording uses the exact video supplied by the user, VxlQG8s24zI. Its YouTube title identifies it as a live cover of The 1975 for P3 Christine Live; the catalogue preserves that version information. Downloaded as format 251 with yt-dlp, without the radio playlist parameters.
 
 The user requested deployment of the expanded catalogue on 18 October 2026. The release packages all 22 installed recordings (the original five plus 17 additions).
+
+## Additional track — 18 October 2026
+
+Added **CA7RIEL & Paco Amoroso, Fred again.. — Lo Quiero Ya !** from the user’s exact link: https://www.youtube.com/watch?v=ZTy_Pnvckns. YouTube distribution metadata identifies the track and artists, channel “Ca7riel - Topic”, album “FREE SPIRITS”, 5020 Records, release date 19 March 2026, duration 3:17. Downloaded with yt-dlp as format 251 (Opus/WebM), without conversion. Local asset: `public/audio/ca7riel-paco-amoroso-fred-again-lo-quiero-ya.webm`. The catalogue now contains 23 recordings.
