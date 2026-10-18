@@ -1,3 +1,4 @@
+import {HandMotion} from './motion.js';
 import {extendedFingers} from './gestures.js';
 
 const EDGES=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
@@ -17,15 +18,18 @@ export class HandOverlay {
       const fingers=extendedFingers(points,this.aspect);if(!fingers)continue;
       const id=data.handIds?.[index]??index,state=states.get(id),old=this.hands.get(id);
       const gesture=POWERS[state?.stable]?state.stable:state?.mode<0?'push':'pull';
-      next.set(id,{target:points,points:old?.points||points.map(p=>({...p})),gesture,fingers});
+      const motion=state?.motion||old?.motion||new HandMotion();
+      if(!state?.motion)motion.update(points,time,this.aspect,data.timestamp??time);
+      next.set(id,{target:points,motion,gesture,fingers});
     }
     this.hands=next;this.lastSeen=time;
   }
   clear(){this.hands.clear();this.view=null;this.lastSeen=-Infinity;this.lastFrame=0;}
   render(time,cameraActive){
-    if(!this.enabled||time-this.lastFrame<1000/30)return;
+    if(!this.enabled)return;
     const dt=Math.min((time-this.lastFrame)/1000,.1);this.lastFrame=time;
-    const live=cameraActive&&time-this.lastSeen<350;
+    const expiry=Math.max(350,...[...this.hands.values()].map(h=>h.motion.motion.interval*3));
+    const live=cameraActive&&time-this.lastSeen<expiry;
     const hands=live?[...this.hands.values()].sort((a,b)=>b.target[9].x-a.target[9].x):[];
     this.status.textContent=!cameraActive?'Camera off':hands.length?`${hands.length} tracked`:'No hands';
     this.root.dataset.live=String(hands.length>0);
@@ -43,7 +47,8 @@ export class HandOverlay {
     const width=Math.round(w*dpr),height=Math.round(h*dpr);
     if(this.canvas.width!==width||this.canvas.height!==height){this.canvas.width=width;this.canvas.height=height;}
     const ctx=this.ctx;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
-    const aspect=this.aspect||4/3,all=hands.flatMap(hand=>hand.target);
+    for(const hand of hands)hand.points=hand.motion.sample(time);
+    const aspect=this.aspect||4/3,all=hands.flatMap(hand=>hand.points);
     // Frame the hands rather than the whole camera image, so fingers remain legible.
     // Smooth the shared crop to preserve relative hand positions without zoom jitter.
     if(!all.length){this.view=null;return;}
@@ -54,8 +59,6 @@ export class HandOverlay {
     const [cx,cy,vw,vh]=this.view,fit=Math.min((w-16)/vw,(h-12)/vh);
     const xy=p=>[w/2+((1-p.x)*aspect-cx)*fit,h/2+(p.y-cy)*fit];
     for(const hand of hands){
-      const a=1-Math.exp(-dt/.025);
-      hand.points.forEach((p,i)=>{p.x+=(hand.target[i].x-p.x)*a;p.y+=(hand.target[i].y-p.y)*a;});
       const points=hand.points,[,color]=POWERS[hand.gesture];
       ctx.beginPath();[0,5,9,13,17].forEach((i,k)=>{const p=xy(points[i]);k?ctx.lineTo(...p):ctx.moveTo(...p);});ctx.closePath();
       ctx.fillStyle=color+'18';ctx.fill();

@@ -8,6 +8,7 @@ import { AudioInput } from './audio';
 import { Tracking } from './tracking';
 import { HandForces, handForce } from './interactions';
 import { HandOverlay } from './hand-overlay';
+import { MotionTrack } from './motion';
 import { mouseHandForce } from './mouse-hand';
 import {forceFromSlider,sliderFromForce} from './force-controls';
 import { AdaptiveQuality } from './performance';
@@ -27,11 +28,12 @@ const handOverlay=new HandOverlay($('hand-demo'));handOverlay.setEnabled(showHan
 const showcase=new ShowcaseTimeline(),showcaseSound=new AudioInput();
 let showcaseSnapshot=null,showcaseRun=0,showcaseStarting=false,showcaseScore=null,showcaseSource=null,showcaseMuted=false,showcaseAudioFailed=false;
 const showcaseView=new ShowcaseView(showcaseAction);
+const pointerMotion=new MotionTrack({maxPrediction:24});
 const mouseHand={x:0,y:0,active:false,held:false,metaKey:false};
 const modeSettings=settings.modeSettings;
 // Playback and scene pause are session-only; links never restore a frozen scene.
 let paused=matchMedia('(prefers-reduced-motion: reduce)').matches;
-let pullPower=settings.pullPower,pushPower=settings.pullPower;
+let pullPower=settings.pullPower,pushPower=settings.pullPower,pointSize=settings.pointSize;
 const adaptiveQuality=new AdaptiveQuality();let autoCount=settings.autoCount;
 let ready=false,trackingData=null,trackingTime=0,cameraStarting=false,noticeTimer;
 let audioSelection={...settings.audio,playing:false},restoring=true,shuttingDown=false,audioRevision=0,pendingTrack=null,transportBusy=false,transportToken=0;
@@ -41,7 +43,7 @@ engine.onError=gpuError;
 function persist(){
   if(restoring||shuttingDown||showcaseSnapshot)return;
   if(sound.mode==='file'&&sound.element)audioSelection={...audioSelection,position:sound.element.currentTime,playing:!sound.element.paused};
-  const current={resolution:engine.resolution,pullPower,pushPower,count:autoCount?settings.count:engine.count,autoCount,showHands,maxHands:tracker.options.maxHands,palette:engine.palette,effect:engine.effect,persistent:engine.persistent,physicsMode,modeSettings,gain:sound.gain,paused,immersive:document.body.classList.contains('immersive'),audio:{...audioSelection,track:audioSelection.kind==='reference'?audioSelection.track:$('track-select').value||audioSelection.track}};
+  const current={resolution:engine.resolution,pullPower,pushPower,pointSize,count:autoCount?settings.count:engine.count,autoCount,showHands,maxHands:tracker.options.maxHands,palette:engine.palette,effect:engine.effect,persistent:engine.persistent,physicsMode,modeSettings,gain:sound.gain,paused,immersive:document.body.classList.contains('immersive'),audio:{...audioSelection,track:audioSelection.kind==='reference'?audioSelection.track:$('track-select').value||audioSelection.track}};
   if(pendingTrack)current.audio={...current.audio,kind:'reference',track:pendingTrack,position:0};
   saveSettings(current);writeURL(current);
 }
@@ -55,7 +57,6 @@ const tracker=new Tracking($('camera'),data=>{
   $('camera-count').textContent=`${data.hands.length} hands`;
   for(const point of data.bursts){const [x,y]=mapPoint(point);engine.explode(x,y);}
   handOverlay.update(data,handForces.states,trackingTime);
-  drawSkeleton(data);
 },status=>{ $('tracking-status').textContent=status;if(status.startsWith('Tracking stopped')){resetCamera();notice(status);} },{maxHands:settings.maxHands});
 function drawSkeleton(data){
   const canvas=$('skeleton'),video=$('camera');canvas.width=canvas.clientWidth*2;canvas.height=canvas.clientHeight*2;
@@ -90,6 +91,12 @@ function forceUI(){
   $('force-power').setAttribute('aria-valuetext',pullPower.toFixed(3)+'×');
 }
 forceUI();$('force-power').oninput=e=>{pullPower=pushPower=forceFromSlider(e.target.value);forceUI();persist();};
+function pointSizeUI(){
+  $('point-size').value=String(pointSize);
+  $('point-size-value').textContent=pointSize.toFixed(2)+'×';
+  $('point-size').setAttribute('aria-valuetext',pointSize.toFixed(2)+'×');
+}
+pointSizeUI();$('point-size').oninput=e=>{pointSize=Number(e.target.value);pointSizeUI();persist();};
 $('resolution').value=engine.resolution;$('resolution').onchange=e=>{engine.resolution=e.target.value;engine.renderScale=1;engine.resize(true);adaptiveQuality.reset();persist();};
 $('max-hands').value=String(settings.maxHands);$('max-hands').onchange=async e=>{tracker.options.maxHands=Number(e.target.value);persist();if(tracker.active){tracker.stop();resetCamera();await toggleCamera();}};
 function audioUI(){
@@ -257,15 +264,22 @@ function updatePointer(e){
  updateSettingsPeek(e);
  const overSettings=document.body.classList.contains('settings-peek')&&e.clientX>=innerWidth-settingsPanel.offsetWidth-36;
  const active=!overSettings&&!e.target.closest('button,input,select,textarea,a,.panel,header,footer,video');
- mouseHand.x=(2*e.clientX/innerWidth-1)*(innerWidth/innerHeight);mouseHand.y=1-2*e.clientY/innerHeight;
+ const now=performance.now();
+ const samples=e.getCoalescedEvents?.()||[];
+ for(const sample of [...samples,e]){
+  const timestamp=Number.isFinite(sample.timeStamp)&&Math.abs(now-sample.timeStamp)<1000?sample.timeStamp:now;
+  pointerMotion.update([sample.clientX,sample.clientY],timestamp);
+ }
+ const [px,py]=pointerMotion.sample(now).position;
+ mouseHand.x=(2*px/innerWidth-1)*(innerWidth/innerHeight);mouseHand.y=1-2*py/innerHeight;
  mouseHand.active=active;mouseHand.metaKey=e.metaKey;
  if(!active||!(e.buttons&1))mouseHand.held=false;
  if(e.type==='pointerdown'&&e.button===0&&active){
   mouseHand.held=true;
-  if(!e.metaKey&&pushPower>0)engine.explode(mouseHand.x,mouseHand.y,pushPower);
+  if(!e.metaKey&&pushPower>0)engine.explode((2*e.clientX/innerWidth-1)*(innerWidth/innerHeight),1-2*e.clientY/innerHeight,pushPower);
  }
  engine.mouse=[mouseHand.x,mouseHand.y,.18,active&&!mouseHand.held?1:0];
- const dot=$('mouse-dot');dot.style.left=`${e.clientX}px`;dot.style.top=`${e.clientY}px`;dot.hidden=e.pointerType==='touch'||overSettings;
+ const dot=$('mouse-dot');dot.style.left=`${px}px`;dot.style.top=`${py}px`;dot.hidden=e.pointerType==='touch'||overSettings;
  pointerIdleTimer=setTimeout(clearPointer,5000);
 }
 addEventListener('pointermove',updatePointer);
@@ -273,7 +287,7 @@ addEventListener('pointerdown',updatePointer);
 addEventListener('pointerup',updatePointer);
 addEventListener('pointercancel',clearPointer);
 addEventListener('keyup',e=>{if(e.key==='Meta')mouseHand.metaKey=false;});
-function clearPointer(){clearTimeout(pointerIdleTimer);mouseHand.active=false;mouseHand.held=false;mouseHand.metaKey=false;engine.mouse=[0,0,.18,0];$('mouse-dot').hidden=true;document.body.classList.add('pointer-idle');}
+function clearPointer(){pointerMotion.clear();clearTimeout(pointerIdleTimer);mouseHand.active=false;mouseHand.held=false;mouseHand.metaKey=false;engine.mouse=[0,0,.18,0];$('mouse-dot').hidden=true;document.body.classList.add('pointer-idle');}
 pointerIdleTimer=setTimeout(clearPointer,5000);
 document.addEventListener('pointerleave',clearPointer);
 addEventListener('blur',clearPointer);
@@ -423,7 +437,20 @@ addEventListener('pagehide',teardown,{once:true});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){if(showcase.active&&!showcase.paused&&!showcase.complete)showcaseAction('pause');persist();}});
 let last=0,lastUI=0,frames=[],raf=0;
 function frame(now){
-  raf=requestAnimationFrame(frame);handOverlay.render(now,tracker.active);if(!ready||document.hidden){last=now;return;}if(resizePending){engine.resize();resizePending=false;}
+  raf=requestAnimationFrame(frame);handOverlay.render(now,tracker.active);
+  if(!showcase.active){
+    const pointer=pointerMotion.sample(now);
+    if(pointer){const [x,y]=pointer.position;
+      mouseHand.x=(2*x/innerWidth-1)*(innerWidth/innerHeight);mouseHand.y=1-2*y/innerHeight;
+      engine.mouse=[mouseHand.x,mouseHand.y,.18,mouseHand.active&&!mouseHand.held?1:0];
+      $('mouse-dot').style.left=`${x}px`;$('mouse-dot').style.top=`${y}px`;
+    }
+    if(tracker.active&&trackingData){
+      const states=handForces.sample(now);
+      drawSkeleton({hands:states.map(s=>s.motion.sample(now)),handIds:states.map(s=>s.id)});
+    }
+  }
+  if(!ready||document.hidden){last=now;return;}if(resizePending){engine.resize();resizePending=false;}
   const dt=last?(now-last)/1000:1/60;last=now;
   let demo=null;
   if(showcase.active){
@@ -441,7 +468,7 @@ function frame(now){
   engine.musicActive=activeSound.mode==='mic'||activeSound.mode==='tab'||(activeSound.mode==='file'&&!!activeSound.element&&!activeSound.element.paused);
   const audio=activeSound.sample(now/1000);engine.audioResponse=activeSound.gain;engine.musicTransient=activeSound.transient;engine.emissionBands=activeSound.emissionBands;engine.ringBands=activeSound.ringSpectrum.levels;engine.ringAttacks=activeSound.ringSpectrum.attacks;audio[3]=Math.max(audio[3],activeSound.transient*.8);
   // Hand pull/push is separate from the mouse obstacle; body joints never attract.
-  const forces=hands.map(hand=>handForce(hand,engine.persistent,pullPower,pushPower));
+  const forces=hands.map(hand=>handForce(hand,engine.persistent,pullPower,pushPower,pointSize));
   const mouseForce=mouseHandForce(demo?demo.pointer:mouseHand,engine.persistent,pullPower,pushPower);if(mouseForce)forces.push(mouseForce);
   const scenePaused=showcase.active?(showcase.paused||showcase.complete||showcaseStarting):paused;
   if(autoCount&&!scenePaused&&!['smoke','fluid-ring'].includes(physicsMode)){const quality=adaptiveQuality.update(dt,engine.count,engine.renderScale,tracker.active&&tracker.backend==='GPU'?tracker.ms:0);if(quality){engine.count=quality.count;engine.renderScale=engine.resolution==='auto'?quality.scale:1;countUI();}}

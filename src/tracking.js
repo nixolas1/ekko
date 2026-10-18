@@ -107,12 +107,12 @@ export class Tracking {
     }
     if (data.type !== 'result') return;
     this.busy = false; this.failures = 0;
-    const now = performance.now(), gap = now - this.lastResult;
+    const now = performance.now(), gap = this.lastResult ? now - this.lastResult : 0;
     if (this.lastResult && gap > 0) { const instant = 1000 / gap; this.hz = this.hz && gap < 2000 ? this.hz * .7 + instant * .3 : instant; }
     this.lastResult = now; this.ms = data.ms; this.latency = now - data.timestamp; this.backend = data.backend;
     this.aspect = data.width / data.height || 0;
     // Gesture time is the capture time, so cooldowns do not depend on worker latency.
-    const bursts = this.gestures.update(data.hands, data.timestamp, this.aspect || 1);
+    const bursts = this.gestures.update(data.hands, data.timestamp, this.aspect || 1, Math.max(gap, data.ms || 0));
     try {
       this.onResult({ ...data, bursts, handIds: this.gestures.ids.slice(), aspect: this.aspect, latency: now - data.timestamp, hz: this.hz });
     } catch (error) { console.error(error); }

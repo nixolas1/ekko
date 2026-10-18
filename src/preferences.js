@@ -1,3 +1,4 @@
+import {clampPointSize} from './force-controls.js';
 import { resolveTrackId } from './music.js';
 export const SETTINGS_KEY='ekko:settings:v1';
 const counts=[32768,65536,131072,262144,524288,1048576,2097152,3145728];
@@ -11,6 +12,7 @@ export function normalizeSettings(value={}){
     resolution:['native','4k','auto'].includes(s.resolution)?s.resolution:'native',
     pullPower:Math.max(0,Math.min(3,force)),
     pushPower:Math.max(0,Math.min(3,force)),
+    pointSize:clampPointSize(s.pointSize),
     showHands:s.showHands===true,
     maxHands:[2,4,8].includes(s.maxHands)?s.maxHands:2,
     palette:[0,1,2,3,4,5,6].includes(s.palette)?s.palette:0,

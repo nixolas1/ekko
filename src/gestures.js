@@ -108,13 +108,17 @@ export class GestureTracker {
     this.options = { ...DEFAULTS, ...options };
     this.reset();
   }
-  reset() { this.tracks = []; this.nextId = 1; this.recent = []; this.ids = []; }
+  reset() { this.lastUpdate=null;this.interval=0;this.tracks = []; this.nextId = 1; this.recent = []; this.ids = []; }
   // `ids` (aligned with the last `hands`) holds each hand's current track id.
-  update(hands, time, aspect = 1) {
+  update(hands, time, aspect = 1, cadence = this.interval) {
     const o = this.options;
     if (!Number.isFinite(time)) return [];
     hands = (hands || []).filter(points => points && points.length >= 21 && finite(points[0]));
-    this.tracks = this.tracks.filter(t => time - t.seen < o.expire);
+    // Tracking can supply the inference cadence, including the first slow frame.
+    // Otherwise use established cadence rather than interpreting loss as slow input.
+    this.tracks = this.tracks.filter(t => time - t.seen < Math.max(o.expire,cadence*3));
+    if(this.lastUpdate!==null&&time>this.lastUpdate)this.interval=time-this.lastUpdate;
+    this.lastUpdate=time;
     this.recent = this.recent.filter(b => time - b.time < o.suppressTime);
 
     const pairs = [];
@@ -137,7 +141,7 @@ export class GestureTracker {
       if (!track) {
         track = { id: this.nextId++, x: wrist.x, y: wrist.y, seen: time, closed: 0, open: 0, armed: false, closedAt: -Infinity, last: -Infinity, partial: 0, partialSince: null };
         this.tracks.push(track);
-      } else if (time - track.seen > o.gapReset) { track.closed = 0; track.open = 0; track.partialSince = null; }
+      } else if (time - track.seen > o.gapReset) { track.closed = 0; track.open = 0; track.partialSince = null; track.armed = false; }
       track.x = wrist.x; track.y = wrist.y; track.seen = time;
 
       // Unusable landmarks keep the identity but count as neither closed nor open.
