@@ -28,8 +28,17 @@ test('old force links migrate to one force; pause URLs cannot freeze a fresh ses
 test('per-mode tuning survives links without changing other modes',()=>{
  const saved=normalizeSettings({modeSettings:{smoke:{speed:.5}}});
  const parsed=settingsFromURL('https://example.test/?mode=fluid-ring&speed=1.8&glow=2&turbulence=.3&emission=1.5',saved);
- assert.deepEqual(parsed.modeSettings['fluid-ring'],{speed:1.8,glow:2,turbulence:.3,emission:1.5});
+ assert.deepEqual(parsed.modeSettings['fluid-ring'],{speed:1.8,glow:2,turbulence:.3,emission:1.5,visibility:1});
  assert.equal(parsed.modeSettings.smoke.speed,.5);
  const again=settingsFromURL(settingsURL('https://example.test/',parsed),saved);
  assert.deepEqual(again.modeSettings['fluid-ring'],parsed.modeSettings['fluid-ring']);
+});
+
+test('particle visibility is independent per mode, bounded and linkable',()=>{
+ const saved=normalizeSettings({physicsMode:'persistent',modeSettings:{persistent:{visibility:2.5},sculpture:{visibility:.5}}});
+ const parsed=settingsFromURL(settingsURL('https://example.test',saved),saved);
+ assert.equal(parsed.modeSettings.persistent.visibility,2.5);assert.equal(parsed.modeSettings.sculpture.visibility,.5);
+ const next=settingsFromURL('https://example.test/?mode=sculpture&visibility=3',parsed);
+ assert.equal(next.modeSettings.sculpture.visibility,3);assert.equal(next.modeSettings.persistent.visibility,2.5);
+ assert.equal(settingsFromURL('https://example.test/?visibility=100',saved).modeSettings.persistent.visibility,2.5);
 });

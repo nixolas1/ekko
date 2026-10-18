@@ -71,26 +71,28 @@ forceUI();$('force-power').oninput=e=>{pullPower=pushPower=forceFromSlider(e.tar
 $('resolution').value=engine.resolution;$('resolution').onchange=e=>{engine.resolution=e.target.value;engine.renderScale=1;engine.resize(true);adaptiveQuality.reset();persist();};
 $('max-hands').value=String(settings.maxHands);$('max-hands').onchange=async e=>{tracker.options.maxHands=Number(e.target.value);persist();if(tracker.active){tracker.stop();resetCamera();await toggleCamera();}};
 function audioUI(){
-  const mic=audioSelection.kind==='mic',file=audioSelection.kind==='file',youtube=audioSelection.kind==='youtube';
+  const mic=audioSelection.kind==='mic',tab=audioSelection.kind==='tab',file=audioSelection.kind==='file',youtube=audioSelection.kind==='youtube';
+  const sharing=tab&&transportBusy&&sound.mode!=='tab';
   const playing=sound.mode==='file'&&!!sound.element&&!sound.element.paused;
-  $('audio-status').textContent=mic?(sound.mode==='mic'?'Listening':'Mic off'):playing?'Playing':'Paused';
-  $('track-select').hidden=mic||file||youtube;
+  $('audio-status').textContent=tab?(sharing?'Choose a tab…':sound.mode==='tab'?'Tab connected':'Tab disconnected'):mic?(sound.mode==='mic'?'Listening':'Mic off'):playing?'Playing':'Paused';
+  $('track-select').hidden=mic||tab||file||youtube;
   $('youtube-panel').hidden=!youtube;$('youtube-button').setAttribute('aria-pressed',String(youtube));
-  $('library').setAttribute('aria-pressed',String(!mic&&!file&&!youtube));
+  $('library').setAttribute('aria-pressed',String(!mic&&!tab&&!file&&!youtube));
+  $('tab-audio').setAttribute('aria-pressed',String(tab));
   $('microphone').setAttribute('aria-pressed',String(mic));
   $('file-button').setAttribute('aria-pressed',String(file));
-  $('track-play').setAttribute('aria-label',mic?(sound.mode==='mic'?'Pause microphone':'Start microphone'):(playing?'Pause music':'Play music'));
-  $('track-play').innerHTML=mic?(sound.mode==='mic'?'Ⅱ Pause input':'▶ Start microphone'):(playing?'Ⅱ Pause':'▶ Play')+' <kbd>Space</kbd>';
+  $('track-play').setAttribute('aria-label',tab?(sharing?'Cancel tab sharing request':sound.mode==='tab'?'Stop sharing tab audio':'Share tab audio'):mic?(sound.mode==='mic'?'Pause microphone':'Start microphone'):(playing?'Pause music':'Play music'));
+  $('track-play').innerHTML=(tab?(sharing?'× Cancel request':sound.mode==='tab'?'■ Stop sharing':'↗ Share tab'):mic?(sound.mode==='mic'?'Ⅱ Pause input':'▶ Start microphone'):(playing?'Ⅱ Pause':'▶ Play'))+' <kbd>Space</kbd>';
   const loaded=file||youtube?sound.mode==='file':loadedTrack()===$('track-select').value;
-  $('track-state').textContent=mic?'Live audio input':file||youtube?(audioSelection.name||'Audio file'):loaded?'Ready':'Choose a song';
-  for(const link of document.querySelectorAll('[data-track-credit]'))link.hidden=mic||file||youtube||link.dataset.trackCredit!==$('track-select').value;
-  $('audio-source-note').textContent=youtube?'Import audio for full frequency response. Music opens paused.':mic?'Microphone sound drives the visuals. It is never played back or recorded.':file?'Your file stays on this device. Choose Audio file again to replace it.':'Choose a song to start playing. Opening or refreshing the page keeps music paused.';
+  $('track-state').textContent=tab?(sound.mode==='tab'?'Live spectrum from your shared tab':'Choose a tab playing music or video'):mic?'Live audio input':file||youtube?(audioSelection.name||'Audio file'):loaded?'Ready':'Choose a song';
+  for(const link of document.querySelectorAll('[data-track-credit]'))link.hidden=mic||tab||file||youtube||link.dataset.trackCredit!==$('track-select').value;
+  $('audio-source-note').textContent=tab?(sound.mode==='tab'?'Play or pause the video in its own tab. EKKO analyses audio locally; nothing is recorded or uploaded. Stop sharing disconnects EKKO only.':'Open your video in another tab. Select Share tab, choose that tab and enable “Share tab audio”. Use desktop Chrome or Edge. Refresh requires sharing again.'):youtube?'Import audio for full frequency response. Music opens paused.':mic?'Microphone sound drives the visuals. It is never played back or recorded.':file?'Your file stays on this device. Choose Audio file again to replace it.':'Choose a song to start playing. Opening or refreshing the page keeps music paused.';
 }
 // Library track currently held by the audio element, or null when another source (or nothing) is loaded.
 function loadedTrack(){return audioSelection.kind==='reference'&&sound.mode==='file'&&sound.element?audioSelection.track:null;}
 for(const track of LOCAL_TRACKS)$('track-select').append(new Option(trackLabel(track),track.id));
 $('track-select').value=resolveTrackId(audioSelection.track);
-sound.onchange=(_mode,reason)=>{audioUI();if(reason){audioSelection={kind:'demo',position:0,playing:false};notice(reason);persist();}};
+sound.onchange=(_mode,reason)=>{if(reason){if(!['tab','mic'].includes(audioSelection.kind))audioSelection={kind:'demo',position:0,playing:false};notice(reason);persist();}audioUI();};
 function attachAudio(){
   for(const event of ['play','pause','seeked'])sound.element?.addEventListener(event,()=>{audioUI();persist();});
   audioUI();persist();
@@ -114,6 +116,7 @@ async function toggleMicrophone(){
   catch(error){notice(error.message);}finally{$('microphone').disabled=false;audioUI();}
 }
 $('microphone').onclick=()=>{if(audioSelection.kind==='mic')return;audioRevision++;sound.stop();audioSelection={...audioSelection,kind:'mic',position:0,playing:false};audioUI();persist();};
+$('tab-audio').onclick=()=>{if(audioSelection.kind==='tab')return;audioRevision++;sound.stop();pendingTrack=null;transportToken++;transportBusy=false;audioSelection={...audioSelection,kind:'tab',youtube:'',position:0,playing:false};audioUI();persist();};
 $('library').onclick=async()=>{if(loadedTrack()===$('track-select').value)return;try{await loadLibraryTrack($('track-select').value);}catch(error){notice(error.message);}finally{audioUI();persist();}};
 $('track-select').onchange=async e=>{
   const selection=e.target.value;e.target.blur();pendingTrack=selection;persist();audioUI();
@@ -125,6 +128,12 @@ async function toggleAudio(){
   if(transportBusy){transportToken++;audioRevision++;sound.silence();transportBusy=false;audioUI();persist();return;}
   const token=++transportToken;transportBusy=true;
   try{
+    if(audioSelection.kind==='tab'){
+      audioRevision++;
+      audioUI();
+      if(sound.mode==='tab')sound.stop();else await sound.tabAudio();
+      return;
+    }
     if(audioSelection.kind==='mic'){await toggleMicrophone();return;}
     if(sound.mode==='file'&&sound.element){
       if(sound.element.paused)await playAudio();else{audioRevision++;sound.silence();}
@@ -175,7 +184,7 @@ async function restoreAudio(){
         // Reload/HMR restores the playhead only. Playback always needs an explicit click.
       }
     }
-    // A saved microphone choice never prompts or records automatically.
+    // Saved microphone/tab choices never prompt or capture automatically.
   }catch(error){if(revision===audioRevision)notice(error.message);}
   finally{restoring=false;audioUI();persist();}
 }
@@ -186,25 +195,28 @@ function modeUI(){
   engine.persistent=physicsMode==='persistent';engine.flowMode=({'fluid-ring':6,'plume-glow':7,smoke:1,ring:2,spectral:3,plume:4,duet:5})[physicsMode]||0;
   document.querySelectorAll('[data-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.mode===physicsMode)));
   $('effect').hidden=physicsMode!=='sculpture';$('effect-label').hidden=physicsMode!=='sculpture';
-  $('mode-description').textContent={'fluid-ring':'Nine outward smoke jets. Bass starts at the upper left; higher frequencies follow clockwise.','plume-glow':'Always-smoking ribbons. Notes light up new smoke; each patch carries its glow, then fades.',plume:'The original luminous smoke ribbons, with music-driven flashes.',duet:'Twin streams of warm and cool light, shaped by your hands and music.',spectral:'Layered smoke and fine particles. Bass moves left, mids rise, treble moves right.',smoke:'Buoyant smoke rises and folds. Use your hands to stir the flow.',ring:'The original outward-flowing particle ring. Bend the streams with your hands.',persistent:'Gather light in a closed hand. Open your hand to send it flying.',sculpture:'Music shapes the light. Your hands pull and push it.'}[physicsMode];
+  $('mode-description').textContent={'fluid-ring':'Nine outward smoke jets. Bass starts at the upper left; higher frequencies follow clockwise.','plume-glow':'Always-smoking ribbons. Notes light up new smoke; each patch carries its glow, then fades.',plume:'The original luminous smoke ribbons, with music-driven flashes.',duet:'Twin streams of warm and cool light, shaped by your hands and music.',spectral:'A full-circle smoke ring. Bass starts at the upper left; higher frequencies follow clockwise.',smoke:'Bass hits fire upward from the left; higher notes feed the lanes to the right. Stir the smoke with your hands.',ring:'Outward-flowing particles accelerate with bass intensity. Bend the streams with your hands.',persistent:'Gather light in a closed hand. Open your hand to send it flying.',sculpture:'Music shapes the light. Your hands pull and push it.'}[physicsMode];
   $('particles').disabled=['smoke','fluid-ring'].includes(physicsMode);countUI();modeSettingsUI();
 }
 function modeSettingsUI(){
  engine.modeSettings=modeSettings[physicsMode];
  $('mode-settings-label').textContent=modeNames[physicsMode]+' settings';
- for(const key of ['speed','glow','turbulence','emission']){
+ for(const key of ['speed','glow','turbulence','emission','visibility']){
   const value=engine.modeSettings[key];$('mode-'+key).value=value;$('mode-'+key+'-value').textContent=value.toFixed(2)+'×';
  }
  $('mode-turbulence-control').hidden=!['smoke','fluid-ring'].includes(physicsMode);
  $('mode-emission-control').hidden=!['smoke','fluid-ring','plume','plume-glow'].includes(physicsMode);
+ $('mode-visibility-control').hidden=!['persistent','sculpture'].includes(physicsMode);
 }
-for(const key of ['speed','glow','turbulence','emission'])$('mode-'+key).oninput=e=>{modeSettings[physicsMode][key]=Number(e.target.value);modeSettingsUI();engine.dirty=true;persist();};
+for(const key of ['speed','glow','turbulence','emission','visibility'])$('mode-'+key).oninput=e=>{modeSettings[physicsMode][key]=Number(e.target.value);modeSettingsUI();engine.dirty=true;persist();};
 addEventListener('pointermove',e=>{
  const active=!e.target.closest('button,input,select,textarea,a,.panel,header,footer,video');
  engine.mouse=[(2*e.clientX/innerWidth-1)*(innerWidth/innerHeight),1-2*e.clientY/innerHeight,.18,active?1:0];
+ const dot=$('mouse-dot');dot.style.left=`${e.clientX}px`;dot.style.top=`${e.clientY}px`;dot.hidden=e.pointerType==='touch';
 });
-document.addEventListener('pointerleave',()=>{engine.mouse=[0,0,.18,0];});
-addEventListener('blur',()=>{engine.mouse=[0,0,.18,0];});
+function clearPointer(){engine.mouse=[0,0,.18,0];$('mouse-dot').hidden=true;}
+document.addEventListener('pointerleave',clearPointer);
+addEventListener('blur',clearPointer);
 function selectMode(mode){physicsMode=mode;adaptiveQuality.reset();modeUI();persist();}
 document.querySelectorAll('[data-mode]').forEach(button=>button.onclick=e=>{selectMode(button.dataset.mode);if(e.detail)button.blur();});
 modeUI();
@@ -248,7 +260,7 @@ function frame(now){
   const dt=last?(now-last)/1000:1/60;last=now;
   const hands=tracker.active?handForces.sample(now):[];
   handMarkers.forEach((node,index)=>{const hand=hands[index];node.hidden=!hand;if(hand){node.style.left=`${(hand.x/(innerWidth/innerHeight)+1)*50}%`;node.style.top=`${(1-hand.y)*50}%`;node.classList.toggle('repel',hand.mode<0);node.firstChild.textContent=hand.mode<0?'Push':'Pull';}});
-  engine.musicActive=sound.mode==='mic'||(sound.mode==='file'&&!!sound.element&&!sound.element.paused);
+  engine.musicActive=sound.mode==='mic'||sound.mode==='tab'||(sound.mode==='file'&&!!sound.element&&!sound.element.paused);
   const audio=sound.sample(now/1000);engine.audioResponse=sound.gain;engine.musicTransient=sound.transient;engine.emissionBands=sound.emissionBands;engine.ringBands=sound.ringSpectrum.levels;engine.ringAttacks=sound.ringSpectrum.attacks;audio[3]=Math.max(audio[3],sound.transient*.8);
   // Hand pull/push is separate from the mouse obstacle; body joints never attract.
   const forces=hands.map(hand=>[hand.x,hand.y,hand.strength*(hand.strength<0?pushPower:pullPower),engine.persistent?.95:.65]);
@@ -260,7 +272,7 @@ function frame(now){
     const mean=frames.reduce((a,b)=>a+b,0)/frames.length;$('fps').textContent=paused?'paused':String(Math.round(1000/mean));$('frame-ms').textContent=mean.toFixed(1);
     $('tracking-hz').textContent=tracker.active&&now-trackingTime<500?tracker.hz.toFixed(1):'—';
     $('tracking-detail').textContent=tracker.active?`${Math.round(tracker.ms)} ms analysis · ${Math.round(tracker.latency||0)} ms latency · ${tracker.backend||'…'} · camera ${Math.round(tracker.cameraFps||0)} Hz`:'—';
-    $('mode-label').textContent=`${modeNames[physicsMode]} · ${sound.mode==='demo'?'silent demo':sound.mode==='mic'?'microphone':'audio'}`;
+    $('mode-label').textContent=`${modeNames[physicsMode]} · ${sound.mode==='demo'?'silent demo':sound.mode==='mic'?'microphone':sound.mode==='tab'?'tab audio':'audio'}`;
     const levels=sound.mode==='demo'?audio:[sound.emissionBands[0],(sound.emissionBands[1]+sound.emissionBands[2])*.5,(sound.emissionBands[3]+sound.emissionBands[4])*.5,(sound.emissionBands[5]+sound.emissionBands[6])*.5];
     bars.forEach((bar,i)=>bar.style.height=`${Math.max(5,(engine.musicActive?levels[i]:0)*100)}%`);
   }

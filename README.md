@@ -86,3 +86,13 @@ Choose **YouTube**, paste a single-video link and select **Load audio**. The fiv
 The Python API uses pinned yt-dlp plus its Deno runtime, accepts public audio tracks up to 20 minutes / 40 MiB, and deletes temporary files after each response. It does not use YouTube embeds, browser cookies or login. Private/age-restricted/unavailable videos and server bot checks return an explicit error. Production verification on 18 October 2026 returned `503 youtube-blocked` from YouTube on Vercel; arbitrary-video imports currently work locally, while the five hosted library links work on Vercel. A separately hosted extractor would be needed for arbitrary links on the public site. The optional `EKKO_YOUTUBE_ALLOWED_IDS` environment variable can restrict imports to comma-separated video IDs.
 
 Vite alone does not run the Python API: use `vercel dev` for the complete app, or run `python3 scripts/youtube-dev.py` beside Vite after installing `requirements.txt`. Known library links work in either setup.
+
+### Audio from another browser tab
+
+Choose **Tab audio → Share tab** in Music, select the tab playing your video, and enable **Share tab audio** in the browser picker. Desktop Chrome or Edge is recommended; browsers or selected surfaces without an audio track show a clear error. Keep playing/pausing the video in its original tab. EKKO feeds the captured audio into the same analyser as library music, including all frequency-driven smoke, bass impulses and note lighting. No download, transcoding, microphone, recording or upload is needed.
+
+**Stop sharing** (or Space/M while Tab audio is selected) disconnects EKKO; it does not pause the original video. Browser capture requires a display track, which EKKO requests at low resolution and one frame per second, and never renders or transmits. Switching audio sources or leaving the page releases all capture tracks. Refresh and shared links can remember `source=tab`, but never start capture or open a picker automatically.
+
+Particle ring accelerates with measured bass intensity. Fluid smoke uses stronger upward bass-onset jets on the left, with higher-frequency emitters continuing to the right. Spectral smoke distributes nine frequency sectors around the full circle, with dim smoke between notes.
+
+Airbender and Light shapes have a **Particle visibility** setting under their mode settings, saved separately for each mode and shared as `visibility` in the URL. It controls direct particle brightness independently of Glow. Fullscreen retains a small translucent mouse-position dot.

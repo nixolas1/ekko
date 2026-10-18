@@ -5,7 +5,8 @@ document.querySelector('#run').onclick=async()=>{
  try{
   e.count=32768;e.musicActive=true;e.emissionBands=Array(7).fill(0);await e.init();
   const read=async()=>{const b=e.device.createBuffer({size:e.count*64,usage:GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST});const c=e.device.createCommandEncoder();c.copyBufferToBuffer(e.buffer,0,b,0,b.size);e.device.queue.submit([c.finish()]);await b.mapAsync(GPUMapMode.READ);const a=new Float32Array(b.getMappedRange().slice(0));b.unmap();b.destroy();return a;};
-  for(const mode of [3,4,7]){
+  // Nine-sector spectral smoke has its own full-circle baseline test.
+  for(const mode of [4,7]){
    e.flowMode=mode;e.emissionBands.fill(0);e.frame(0,[0,0,0,0],[],false);const seed=await read();
    for(const lane of [-1,0,3,6]){
     e.device.queue.writeBuffer(e.buffer,0,seed);e.emissionBands.fill(0);if(lane>=0)e.emissionBands[lane]=1;

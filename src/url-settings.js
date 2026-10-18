@@ -15,7 +15,7 @@ export function settingsFromURL(href,saved={}){
   }
   const song=q.get('song');
   if(LOCAL_TRACKS.some(t=>t.id===song))out.audio={...out.audio,kind:'reference',track:song,position:0};
-  if(['reference','demo','mic','file','youtube'].includes(q.get('source')))out.audio.kind=q.get('source');
+  if(['reference','demo','mic','tab','file','youtube'].includes(q.get('source')))out.audio.kind=q.get('source');
   const youtube=q.get('youtube');if(youtube&&/^[A-Za-z0-9_-]{11}$/.test(youtube))out.audio={...out.audio,kind:'youtube',youtube};
   const t=Number(q.get('t'));if(q.has('t')&&q.get('t')!==''&&Number.isFinite(t)&&t>=0)out.audio.position=t;
   for(const [key,[lo,hi]] of Object.entries(MODE_TUNING)){

@@ -218,7 +218,11 @@ export class ParticleEngine {
     d.set([Number(this.palette)||0,this.sceneSize[0],this.sceneSize[1],list.length,...this.burst.slice(0,2),this.served,before],8);
     list.forEach((f,i)=>d.set([f[0],f[1],f[2],f[3]],16+i*4));
     if (!paused) velocities.slice(0,list.length).forEach((v,i)=>d.set([v.vx,v.vy],184+i*4));
-    d.set([effect,fill,Math.pow(131072/count,.55),clamp(real*60,.3,2.5)],144);
+    // A brightness floor keeps dispersed particles legible at high counts. This
+    // setting changes direct particle light, independently of the bloom control.
+    const particleVisibility=mode<1.5?clamp(Number(tuning.visibility)||1,.25,4):1;
+    const densityGain=mode<1.5?Math.max(.38,Math.pow(131072/count,.55)):Math.pow(131072/count,.55);
+    d.set([effect,fill,densityGain*particleVisibility,clamp(real*60,.3,2.5)],144);
     d.set([drained.length,fresh?0:Math.exp(-real/Math.max(.02,Number(this.trail)||.14)),Math.max(0,Number(this.exposure)||0),Math.max(0,Number(this.bloom)||0)],148);
     d.set([mode,this.musicActive?1:0,clamp(Number(this.musicTransient)||0,0,1),clamp(Number(this.audioResponse)||1.2,.3,3)],312);
     const emission=this.emissionBands||[audio?.[0],audio?.[0],audio?.[1],audio?.[1],audio?.[1],audio?.[2],audio?.[2]];

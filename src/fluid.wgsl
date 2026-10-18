@@ -63,18 +63,48 @@ fn source(q: vec2f) -> vec4f {
     }
     return s;
   }
-  let width=min(params.clock.z*.7,.95);
   for(var i=0u;i<7u;i++){
     let u=f32(i)/6.0;
-    let centre=vec2f((u-.5)*width*2.0+.018*sin(params.clock.x*1.3+f32(i)),-.8);
-    let d=(q-centre)/vec2f(.045,.035);
+    let d=(q-vec2f(laneX(i),-.8))/vec2f(.045,.035);
     let shape=exp(-dot(d,d)*.5);
-    let level=emissionLevel(i,params.emissionLow,params.emissionHigh);
-    let strength=select(.7,smoothstep(.06,.85,level),params.simulation.y>.5);
     let colour=select(vec3f(.65,.69,.75),lightPalette(params.display.x,u),params.simulation.y>.5);
+    let strength=laneStrength(i);
     s+=vec4f(colour*strength*shape*3.5,strength*shape*5.5)*params.tuning.w;
   }
   return s;
+}
+// Rising-smoke lanes run bass (left) to treble (right). Ring attack bands 0-3
+// match lanes 0-3 exactly; the higher ring bands fold into lanes 4-6.
+fn laneX(i:u32) -> f32 {
+  let width=min(params.clock.z*.7,.95);
+  return (f32(i)/6.0-.5)*width*2.0+.018*sin(params.clock.x*1.3+f32(i));
+}
+fn laneAttack(i:u32) -> f32 {
+  if(i<5u){return ringAttack(i);}
+  if(i==5u){return max(ringAttack(5u),ringAttack(6u));}
+  return max(ringAttack(7u),ringAttack(8u));
+}
+fn laneLevel(i:u32) -> f32 { return smoothstep(.06,.85,emissionLevel(i,params.emissionLow,params.emissionHigh)); }
+fn laneBass(i:u32) -> f32 { return select(select(1.0,1.6,i==1u),2.4,i==0u); }
+// Silence keeps the fixed gray baseline. With music, the held level sets the
+// emission rate and note onsets multiply it, most strongly in the bass lanes.
+fn laneStrength(i:u32) -> f32 {
+  if(params.simulation.y<.5){return .7;}
+  return laneLevel(i)*(1.0+laneAttack(i)*laneBass(i)*1.4);
+}
+// Upward nozzle acceleration over a short column above each lane. Held notes
+// lift gently; attacks, weighted towards bass, fire the plume upwards.
+fn laneJet(q:vec2f) -> vec2f {
+  if(params.simulation.y<.5){return vec2f(0);}
+  let response=clamp(params.simulation.w,.3,3.0);
+  let column=smoothstep(-.9,-.82,q.y)*(1.0-smoothstep(-.65,-.4,q.y));
+  var lift=0.0;
+  for(var i=0u;i<7u;i++){
+    let dx=(q.x-laneX(i))/.05;
+    let launch=laneLevel(i)*(.55+response*.65)*(.4+laneAttack(i)*laneBass(i)*2.2)*laneBass(i);
+    lift+=exp(-dx*dx*.5)*launch;
+  }
+  return vec2f(0,lift*column*5.0*params.tuning.w);
 }
 fn nozzleVelocity(q:vec2f) -> vec2f {
   var force=vec2f(0);
@@ -99,7 +129,7 @@ fn nozzleVelocity(q:vec2f) -> vec2f {
   v.y += (smoke.a*select(1.6,.13,ringMode())-concentration*.09)*params.clock.y;
   let src=source(q);
   if(ringMode()){v+=nozzleVelocity(q)*params.clock.y;}
-  else {v += vec2f(.16*sin(params.clock.x*1.9+q.x*19.0),.35)*src.a*params.clock.y;}
+  else {v += (vec2f(.16*sin(params.clock.x*1.9+q.x*19.0),.35)*src.a+laneJet(q))*params.clock.y;}
   for(var j=0u;j<min(u32(params.display.w),32u);j++) {
     let hand=params.forces[j]; let delta=hand.xy-q;
     let radius=max(hand.w,.05); let d=length(delta);

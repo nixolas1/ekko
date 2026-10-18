@@ -36,7 +36,8 @@ fn voxelize(@builtin(global_invocation_id) gid: vec3u) {
   // Smoke fades in after birth and thins out towards the end of life, as in render.wgsl.
   let age = p.extra.y;
   let life = max(p.extra.w, 0.001);
-  let weight = smoothstep(0.0, 0.35, age) * (1.0 - smoothstep(life * 0.5, life, age));
+  // The radial term matches reference-render.wgsl: the ring dissolves before its recycle radius.
+  let weight = smoothstep(0.0, 0.35, age) * (1.0 - smoothstep(life * 0.5, life, age)) * (1.0 - smoothstep(0.95, 1.3, length(p.position.xy)));
   // The comparison is false for NaN, so non-finite positions are rejected here as well.
   if (weight < 0.004 || !all(abs(p.position.xyz) < volume.box.xyz)) { return; }
   let g = clamp((p.position.xyz / volume.box.xyz * 0.5 + 0.5) * vec3f(f32(VX), f32(VY), f32(VZ)) - 0.5, vec3f(0.0), vec3f(f32(VX) - 1.001, f32(VY) - 1.001, f32(VZ) - 1.001));
@@ -126,6 +127,19 @@ fn density(q: vec3f, detail: f32) -> vec2f {
   return vec2f(rho, cell.g * 0.75 + cell.b * 0.25);
 }
 
+// Spectral ring light, identical in reference-render.wgsl: nine sectors round the full circle, band 0 (bass)
+// at the upper left and higher bands clockwise as in fluid.wgsl. Hue follows the band, brightness its level;
+// w carries that brightness alone, for lamp coverage.
+fn spectralLight(xy: vec2f, response: f32) -> vec4f {
+  let s = fract((2.35619449 - atan2(xy.y, xy.x + 0.000001)) / TAU) * 9.0;
+  let i = u32(s) % 9u;
+  let j = (i + 1u) % 9u;
+  let w = smoothstep(0.0, 1.0, fract(s));
+  let a = pow(clamp(params.ringLevels[i / 4u][i % 4u], 0.0, 1.0), response) * (1.0 + 0.8 * clamp(params.ringAttacks[i / 4u][i % 4u], 0.0, 1.0));
+  let b = pow(clamp(params.ringLevels[j / 4u][j % 4u], 0.0, 1.0), response) * (1.0 + 0.8 * clamp(params.ringAttacks[j / 4u][j % 4u], 0.0, 1.0));
+  return vec4f(mix(lightPalette(params.display.x, f32(i) / 8.0) * a, lightPalette(params.display.x, f32(j) / 8.0) * b, w), mix(a, b, w));
+}
+
 // Same pinhole camera as render.wgsl: screen = xy / (1 - z / distance), eye on +z.
 @fragment fn rayFragment(input: RayOutput) -> @location(0) vec4f {
   let eye = vec3f(0.0, 0.0, volume.box.w);
@@ -148,11 +162,7 @@ fn density(q: vec3f, detail: f32) -> vec2f {
   let key = vec3f(1.0, 0.98, 0.94) * volume.light.y;
   // The volume itself scatters the music lights; tiny additive particles alone
   // disappear behind dense smoke. Silent/demo input leaves this lighting off.
-  let bands = select(vec3f(0.0), clamp(params.sound.xyz, vec3f(0.0), vec3f(1.0)), params.simulation.y > 0.5);
-  let lamps = pow(bands, vec3f(0.65));
-  let bassColor=lightPalette(params.display.x,0.0);
-  let midColor=lightPalette(params.display.x,0.5);
-  let highColor=lightPalette(params.display.x,1.0);
+  let music = params.simulation.y > 0.5;
   var transmittance = 1.0;
   var color = vec3f(0.0);
   for (var i = 0u; i < steps; i++) {
@@ -164,13 +174,11 @@ fn density(q: vec3f, detail: f32) -> vec2f {
       // Lower smoke receives less sky. Weighting by the absorbed fraction keeps brightness
       // independent of the step count.
       let sky = 0.55 + 0.45 * smoothstep(-1.0, 1.0, q.y);
-      let left = exp(-dot(q.xy - vec2f(-0.42, 0.02), q.xy - vec2f(-0.42, 0.02)) * 2.2);
-      let top = exp(-dot(q.xy - vec2f(0.0, 0.48), q.xy - vec2f(0.0, 0.48)) * 2.8);
-      let right = exp(-dot(q.xy - vec2f(0.42, 0.02), q.xy - vec2f(0.42, 0.02)) * 2.2);
-      let musicLight = bassColor * lamps.x * left
-                     + midColor * lamps.y * top
-                     + highColor * lamps.z * right;
-      let lampCoverage = max(max(lamps.x * left, lamps.y * top), lamps.z * right);
+      // Sector lamps sit on a band round the emitting ring; the undefined direction at the centre stays unlit.
+      let r = length(q.xy);
+      let lamp = select(vec4f(0.0), spectralLight(q.xy, 0.65), music) * exp(-(r - 0.42) * (r - 0.42) * 2.2) * smoothstep(0.03, 0.18, r);
+      let musicLight = lamp.rgb;
+      let lampCoverage = min(lamp.w, 1.0);
       let neutral = 0.82 * (1.0 - lampCoverage * 0.88) * (ambient * sky + key * s.y);
       color += transmittance * absorbed * (neutral + musicLight * 8.0);
       transmittance *= 1.0 - absorbed;

@@ -140,9 +140,10 @@ test('limited adapters cap particle allocation and requests to their actual buff
   assert.equal(log.uniforms.at(-1)[3],2097152);
  },{maxStorageBufferBindingSize:134217728,maxBufferSize:268435456});
 });
-test('three million coincident particles cannot overflow signed density sums',()=>{
- assert(3145728*511<2147483647);
- assert.match(read('src/particles.wgsl'),/fract\(gridPos.x\) \* 512.0/);
+test('three million coincident particles cannot overflow fixed-point density mass',()=>{
+ const shader=read('src/particles.wgsl'),mass=Number(shader.match(/const NODE_MASS = ([\d.]+)/)[1]);
+ assert(3145728*mass<2**32);
+ assert.match(shader,/mass: atomic<u32>/);
 });
 
 test('smoke mode runs the fluid solver, bypasses particle work and freezes density on pause', async()=>{
@@ -170,5 +171,19 @@ test('fluid ring and lasting-glow plume use separate modes and carry nine bands 
   engine.flowMode=7;log.passes.length=0;engine.frame(1/60,[0,0,0,0],[],false);
   assert.equal(simulationMode(log),8);assert(entries(log).includes('referenceFragment'));assert(!entries(log).includes('advectLight'));
   engine.flowMode=4;engine.frame(1/60,[0,0,0,0],[],false);assert.equal(simulationMode(log),5);
+ });
+});
+
+test('particle visibility survives high counts and changes only Airbender and Light shapes',async()=>{
+ await withEngine((engine,log)=>{
+  for(const persistent of [true,false]){
+   engine.flowMode=0;engine.persistent=persistent;engine.count=2097152;
+   engine.modeSettings={visibility:1};engine.frame(1/60,[0,0,0,0],[],false);const base=log.uniforms.at(-1)[146];
+   assert(base>=.37,'dispersed particles retain a brightness floor at high counts');
+   engine.modeSettings={visibility:3};engine.frame(1/60,[0,0,0,0],[],false);
+   assert(Math.abs(log.uniforms.at(-1)[146]/base-3)<1e-5);
+  }
+  engine.flowMode=3;engine.modeSettings={visibility:1};engine.frame(1/60,[0,0,0,0],[],false);const smoke=log.uniforms.at(-1)[146];
+  engine.modeSettings={visibility:4};engine.frame(1/60,[0,0,0,0],[],false);assert.equal(log.uniforms.at(-1)[146],smoke);
  });
 });

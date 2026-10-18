@@ -34,7 +34,7 @@ fn palette(t: f32) -> vec3f { return lightPalette(params.display.x, t); }
   // Energy changes focus/bokeh gently; inverse-area compensation prevents a glowing fog.
   let focus = -0.08 + min(params.sound.x, 1.0) * 0.16;
   let coc = clamp((abs(p.position.z - focus) - 0.12) * 2.0, 0.0, 1.0);
-  let defocus = 1.0 + coc * (0.5 + min(energy, 1.0) * 1.2);
+  let defocus = 1.0 + coc * select(0.2, 0.5 + min(energy, 1.0) * 1.2, smoke);
 
   // Width is a fixed pixel count and the streak length is clamped, so fill cost per particle is bounded.
   let pixel = 2.0 / params.display.z;
@@ -52,6 +52,11 @@ fn palette(t: f32) -> vec3f { return lightPalette(params.display.x, t); }
   let dim = select(select(1.0, 0.55, layer > 0.5), 0.2, layer > 1.5);
   let depth = clamp(0.75 + p.position.z * 0.9, 0.35, 1.25);
   var intensity = params.style.z * params.style.w * dim * depth * (0.7 + min(speed, 2.0) * 0.45) * (0.036 + 0.03 * energy + 0.07 * heat);
+  if (!smoke) {
+    // Visible individual cores even without a hand concentrating the particles.
+    intensity = params.style.z * params.style.w * max(dim,.65) * max(depth,.65)
+      * (0.85 + min(speed,2.0)*.3) * (select(.8,1.4,params.simulation.x>.5) + .08*energy + .14*heat);
+  }
   var color = mix(palette(hue), vec3f(1.0, 0.92, 0.75), min(heat, 1.0) * 0.18);
   if (smoke) {
     let age = p.extra.y;

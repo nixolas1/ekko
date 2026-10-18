@@ -1,4 +1,4 @@
-import { ANALYSER, RingSpectrum, AudioError, TransientDetector, checkAudioFile, demoFrame, followEnvelope, microphoneError, playbackError, requestMicrophone, resumeContext, sanitizeGain, softLimit, spectralLevels, emissionLevels, whenLoaded } from './audio-controls.js';
+import { ANALYSER, RingSpectrum, AudioError, TransientDetector, checkAudioFile, demoFrame, followEnvelope, microphoneError, playbackError, requestMicrophone, requestTabAudio, resumeContext, sanitizeGain, softLimit, spectralLevels, emissionLevels, whenLoaded } from './audio-controls.js';
 
 // Attack/release (seconds) per band: bass snaps up and lets go slowly, highs flicker faster.
 const ATTACK = [0.012, 0.015, 0.01, 0.014];
@@ -68,6 +68,31 @@ export class AudioInput {
       this.error=null;this._setMode('mic');
       return true;
     }catch(error){if(op!==this._op)return false;this.error=error.message;throw error;}
+  }
+  async tabAudio(){
+    const op=++this._op;
+    let stream,source;
+    const discard=()=>{try{source?.disconnect();}catch{}stream?.getTracks().forEach(t=>{t.onended=null;t.stop();});};
+    try{
+      // Resume Web Audio in the same user gesture as the picker, not after it closes.
+      const context=this.context();context.catch(()=>{});
+      // Start the picker before any await, preserving transient user activation.
+      stream=await requestTabAudio(globalThis.navigator?.mediaDevices);
+      if(op!==this._op){discard();return false;}
+      const ctx=await context;
+      if(op!==this._op){discard();return false;}
+      if(!stream.getAudioTracks().some(t=>t.readyState==='live'))throw new AudioError('capture-ended','Tab sharing ended. Select Share tab to reconnect.');
+      // Keep the required low-rate display track alive, but never render or record it.
+      // Disabling it can stall Chrome's capture source when sharing the same tab again.
+      source=ctx.createMediaStreamSource(new MediaStream(stream.getAudioTracks()));
+      source.connect(this.analyser); // Original tab plays the sound; never duplicate it here.
+      this._release();this.stream=stream;this.source=source;
+      stream.getTracks().forEach(t=>{t.onended=()=>{if(this.stream===stream)this._fail('Tab sharing ended. Select Share tab to reconnect.');};});
+      this.error=null;this._setMode('tab');return true;
+    }catch(error){
+      discard();if(op!==this._op)return false;
+      this.error=error.message;throw error;
+    }
   }
   async file(file,{autoplay=true,position=0}={}){
     const op=++this._op;

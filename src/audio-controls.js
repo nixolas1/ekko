@@ -160,6 +160,35 @@ export async function requestMicrophone(mediaDevices) {
   }
 }
 
+// Call directly from a click/key gesture: display capture cannot restore permission.
+export async function requestTabAudio(mediaDevices) {
+  if (!mediaDevices?.getDisplayMedia) throw new AudioError('unsupported', 'Tab audio is unavailable here. Open EKKO in desktop Chrome or Edge over HTTPS or localhost.');
+  let stream;
+  try {
+    let controller;
+    if (globalThis.CaptureController?.prototype?.setFocusBehavior) {
+      controller = new CaptureController();
+      controller.setFocusBehavior('no-focus-change');
+    }
+    stream = await mediaDevices.getDisplayMedia({
+      ...(controller ? { controller } : {}),
+      video: { displaySurface: 'browser', frameRate: 1, width: { ideal: 320 }, height: { ideal: 180 } },
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, suppressLocalAudioPlayback: false },
+      preferCurrentTab: false, selfBrowserSurface: 'exclude', systemAudio: 'exclude', surfaceSwitching: 'exclude', monitorTypeSurfaces: 'exclude',
+    });
+    if (!stream.getAudioTracks().some(track => track.readyState === 'live')) {
+      throw new AudioError('no-tab-audio', 'No tab audio was shared. Choose a browser tab and enable “Share tab audio” in the picker. Desktop Chrome or Edge is recommended.');
+    }
+    return stream;
+  } catch (error) {
+    stream?.getTracks().forEach(track => track.stop());
+    if (error instanceof AudioError) throw error;
+    if (error?.name === 'NotAllowedError') throw new AudioError('capture-cancelled', 'Tab sharing was cancelled or denied. Select Share tab to try again.', error);
+    if (error?.name === 'InvalidStateError') throw new AudioError('capture-focus', 'Click back into EKKO, then select Share tab again.', error);
+    throw new AudioError('capture-failed', 'Could not share tab audio. Try desktop Chrome or Edge and select a browser tab with audio sharing enabled.', error);
+  }
+}
+
 // Resume with a timeout: some browsers leave resume() pending forever when there is no user gesture.
 export async function resumeContext(ctx, timeoutMs = 2000) {
   if (ctx.state !== 'running') {

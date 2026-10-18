@@ -21,7 +21,7 @@ export function normalizeSettings(value={}){
     paused:null,
     immersive:s.immersive===true,
     // track: stable local-library id. Older saves without one meant the single fixed reference track (Endeavors).
-    audio:{youtube:typeof audio.youtube==='string'&&/^[A-Za-z0-9_-]{11}$/.test(audio.youtube)?audio.youtube:'',kind:['reference','file','mic','demo','youtube'].includes(audio.kind)?audio.kind:'demo',track:resolveTrackId(audio.track),position:Number.isFinite(audio.position)?Math.max(0,audio.position):0,playing:false,name:typeof audio.name==='string'?audio.name:''}
+    audio:{youtube:typeof audio.youtube==='string'&&/^[A-Za-z0-9_-]{11}$/.test(audio.youtube)?audio.youtube:'',kind:['reference','file','mic','tab','demo','youtube'].includes(audio.kind)?audio.kind:'demo',track:resolveTrackId(audio.track),position:Number.isFinite(audio.position)?Math.max(0,audio.position):0,playing:false,name:typeof audio.name==='string'?audio.name:''}
   };
 }
 export function loadSettings(storage){try{storage??=globalThis.localStorage;return normalizeSettings(JSON.parse(storage.getItem(SETTINGS_KEY)||'{}'));}catch{return normalizeSettings();}}
@@ -41,7 +41,7 @@ export async function loadMusicFile(){
   try{return await new Promise((resolve,reject)=>{const request=db.transaction('files').objectStore('files').get('last');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});}finally{db.close();}
 }
 
-export const MODE_TUNING={speed:[.25,2],glow:[0,3],turbulence:[0,2],emission:[0,3]};
+export const MODE_TUNING={speed:[.25,2],glow:[0,3],turbulence:[0,2],emission:[0,3],visibility:[.25,4]};
 export function normalizeModeSettings(value={}){
  const result={};
  for(const mode of ['fluid-ring','plume-glow','smoke','ring','spectral','plume','duet','persistent','sculpture']){

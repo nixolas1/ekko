@@ -27,6 +27,18 @@ fn threads(u: f32, count: f32, sharp: f32) -> f32 {
   let x = 0.5 + 0.5 * sin(u * TAU * count + 2.0 * sin(u * TAU * 3.0));
   return pow(x, sharp);
 }
+// Spectral ring light, identical in volume.wgsl: nine sectors round the full circle, band 0 (bass)
+// at the upper left and higher bands clockwise as in fluid.wgsl. Hue follows the band, brightness its level;
+// w carries that brightness alone, for lamp coverage.
+fn spectralLight(xy: vec2f, response: f32) -> vec4f {
+  let s = fract((2.35619449 - atan2(xy.y, xy.x + 0.000001)) / TAU) * 9.0;
+  let i = u32(s) % 9u;
+  let j = (i + 1u) % 9u;
+  let w = smoothstep(0.0, 1.0, fract(s));
+  let a = pow(clamp(params.ringLevels[i / 4u][i % 4u], 0.0, 1.0), response) * (1.0 + 0.8 * clamp(params.ringAttacks[i / 4u][i % 4u], 0.0, 1.0));
+  let b = pow(clamp(params.ringLevels[j / 4u][j % 4u], 0.0, 1.0), response) * (1.0 + 0.8 * clamp(params.ringAttacks[j / 4u][j % 4u], 0.0, 1.0));
+  return vec4f(mix(lightPalette(params.display.x, f32(i) / 8.0) * a, lightPalette(params.display.x, f32(j) / 8.0) * b, w), mix(a, b, w));
+}
 
 @vertex fn referenceVertex(@builtin(vertex_index) vertexId: u32, @builtin(instance_index) id: u32) -> ReferenceOutput {
   let corner = vec2f(f32(vertexId & 1u), f32(vertexId >> 1u)) * 2.0 - 1.0;
@@ -74,19 +86,15 @@ fn threads(u: f32, count: f32, sharp: f32) -> f32 {
   var color = vec3f(0.0);
   if (mode < 4.5) {
     // Native-resolution subpixel filaments provide the detail the volumetric grid cannot hold.
-    let radial = normalize(p.position.xy + vec2f(0.0001));
-    let bands = select(vec3f(0.0), pow(clamp(params.sound.xyz,vec3f(0.0),vec3f(1.0)),vec3f(1.4)), music);
-    let left = pow(max(0.0,-radial.x),2.0);
-    let top = pow(max(0.0,radial.y),4.0);
-    let right = pow(max(0.0,radial.x),2.0);
-    let lighting = lightPalette(params.display.x,0.0) * bands.x * left
-      + lightPalette(params.display.x,0.5) * bands.y * top
-      + lightPalette(params.display.x,1.0) * bands.z * right;
+    // Lit by the sector it was born in (u is its emission angle), so drifting smoke keeps its band.
+    let lighting = select(vec3f(0.0), spectralLight(vec2f(cos(u * TAU), sin(u * TAU)), 1.4).rgb, music);
     let thread = threads(u, 37.0, 5.0);
     // Coherent bright folds separated by transparent regions, rather than a uniform grey veil.
     let sheet = smoothstep(.22, .72, .5 + .5 * sin(u * TAU * 11.0 + sin(u * TAU * 3.0)));
     color = (vec3f(.09,.10,.12) + lighting * 2.1) * vary * (.12 + 1.5 * sheet) * (.45 + 1.6 * thread);
     color *= 1.0 + select(0.0, params.simulation.z * 1.5, music);
+    // Dissolve before particles.wgsl recycles the ring at radius 1.3, so the ring has no hard rim.
+    color *= 1.0 - smoothstep(0.95, 1.3, length(p.position.xy));
   } else if ((mode < 5.5 || mode > 7.5)) {
     // Neutral smoke; lamp light picked up at birth travels up with it and fades.
     let hue = clamp((u - 0.12) / 0.74, 0.0, 1.0);

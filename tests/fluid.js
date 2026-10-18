@@ -74,3 +74,26 @@ $('force-test').onclick=async()=>{testing=true;$('result').textContent='testing 
  const report={pass:high>low*1.3&&kick>held*2&&kick>treble&&inward===0&&inner/ni>outer/no,lowResponse:low,highResponse:high,heldBass:held,bassKick:kick,trebleKick:treble,mouseInner:inner/ni,mouseEdge:outer/no,inwardCells:inward,errors};
  $('result').textContent=JSON.stringify(report,null,2);
  }catch(error){$('result').textContent=JSON.stringify({pass:false,error:error.message,errors});}finally{e.audioResponse=1.2;e.mouse=[0,0,.18,0];testing=false;last=0;}};
+
+// Rising smoke (flow 1): silence keeps the gray baseline, lanes stay bass-left to
+// treble-right, and a bass onset fires a much stronger upward plume than a held note.
+$('smoke-music-test').onclick=async()=>{testing=true;$('result').textContent='testing smoke music response';try{
+ e.flowMode=1;e.mouse=[0,0,.18,0];e.frame(0,[0,0,0,0],[],false);
+ const f=e.fluid,aspect=e.canvas.width/e.canvas.height,ringOf=[0,1,2,3,4,5,7];
+ async function run(active,lane,level,attack,frames=20){
+  f.allocate(aspect,true);e.musicActive=active;e.audioResponse=1.2;
+  e.emissionBands=Array(7).fill(0);e.ringBands=Array(9).fill(0);e.ringAttacks=Array(9).fill(0);
+  if(lane>=0){e.emissionBands[lane]=level;e.ringBands[ringOf[lane]]=level;e.ringAttacks[ringOf[lane]]=attack;}
+  for(let i=0;i<frames;i++)e.frame(1/60,[0,0,0,0],[],false);
+  const vel=await read(f.vel[0],f.size),dye=await read(f.dye[f.index],f.dyeSize);
+  let lift=0,left=0,right=0,mass=0,x=0,y=0;
+  for(let i=0;i<vel.length;i+=4){const vy=Math.max(vel[i+1],0),px=((i/4%f.size[0]+.5)/f.size[0]*2-1)*aspect;lift+=vy;if(px<0)left+=vy;else right+=vy;}
+  for(let i=0;i<dye.length;i+=4){const d=dye[i]+dye[i+1]+dye[i+2],px=((i/4%f.dyeSize[0]+.5)/f.dyeSize[0]*2-1)*aspect,py=(Math.floor(i/4/f.dyeSize[0])+.5)/f.dyeSize[1]*2-1;mass+=d;x+=px*d;y+=py*d;}
+  return {lift,left,right,mass,centroidX:mass?x/mass:0,centroidY:mass?y/mass:0,finite:[...vel,...dye].every(Number.isFinite)};
+ }
+ const silence=await run(false,-1,0,0),quiet=await run(true,-1,0,0),held=await run(true,0,.8,0),kick=await run(true,0,.8,1),treble=await run(true,6,.8,1);
+ const checks={silenceBaseline:silence.mass>0&&silence.lift>0,musicQuietEmpty:quiet.mass===0,bassLeft:kick.centroidX<-.3&&kick.left>kick.right*3,trebleRight:treble.centroidX>.3&&treble.right>treble.left*3,
+  kickBeatsHeld:kick.lift>held.lift*2&&kick.mass>held.mass*1.5,kickBeatsSilence:kick.lift>silence.lift*3,bassBeatsTreble:kick.lift>treble.lift*1.5,kickRisesHigher:kick.centroidY>held.centroidY+.03,
+  finite:[silence,quiet,held,kick,treble].every(r=>r.finite)};
+ $('result').textContent=JSON.stringify({pass:Object.values(checks).every(Boolean)&&!errors.length,checks,silence,quiet,held,kick,treble,errors},null,2);
+ }catch(error){$('result').textContent=JSON.stringify({pass:false,error:error.message,errors});}finally{e.audioResponse=1.2;testing=false;last=0;}};

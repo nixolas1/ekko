@@ -1,11 +1,28 @@
 @group(0) @binding(0) var<storage, read_write> particles: array<Particle>;
 @group(0) @binding(1) var<uniform> params: Parameters;
-struct DensityCell { count: atomic<u32>, x: atomic<i32>, y: atomic<i32>, padding: u32 }
+struct DensityCell { mass: atomic<u32>, unused: array<u32, 3> }
 @group(0) @binding(2) var<storage, read_write> density: array<DensityCell>;
 const GRID = 128u;
+// Each particle's unit mass is split bilinearly over its four nearest nodes in exact 1/1024ths, so a
+// node holds at most 3,145,728 × 1024 < 2³² even if the whole pool coincides.
+const NODE_MASS = 1024.0;
+const SOUND_SPEED2 = 0.06;
 
-// A compact spatial density field avoids an O(n²) all-particle collision loop.
-// The sums are cell-local fixed point, bounded even if all three million particles coincide.
+// A smooth density field on a 128² node grid avoids an O(n²) all-particle collision loop.
+// Any grid still slightly favours some spots inside a cell (noise is weaker between nodes), so the
+// nodes move by a fresh sub-cell offset every frame, shared by binning and separation; the preference
+// then averages out instead of sorting particles into a lattice. Edge particles fold onto border nodes.
+fn densityCoordinate(q: vec2f) -> vec2f {
+  // Low-discrepancy (R2) offsets cover the cell evenly within a few frames, unlike random ones;
+  // exact u32 wrap-around keeps them precise however long the session runs.
+  let frame = u32(max(params.clock.x, 0.0) * 60.0);
+  let shift = vec2f(vec2u(frame * 3242174889u, frame * 2447445413u) >> vec2u(8u)) / 16777216.0;
+  return clamp((q / vec2f(max(params.clock.z, 0.01), 1.0) * 0.5 + 0.5) * f32(GRID) - shift, vec2f(0.0), vec2f(f32(GRID - 1u)));
+}
+fn densityBase(g: vec2f) -> vec2u { return min(vec2u(g), vec2u(GRID - 2u)); }
+// 5-bit bilinear fractions: the four weights always sum to exactly 32² whatever the input, NaN included.
+// Deposition and interpolation share them, so a particle's own mass never pushes it.
+fn densityFraction(g: vec2f, base: vec2u) -> vec2u { return min(vec2u(round((g - vec2f(base)) * 32.0)), vec2u(32u)); }
 @compute @workgroup_size(256)
 fn binParticles(@builtin(global_invocation_id) gid: vec3u) {
   let id = gid.x;
@@ -13,36 +30,47 @@ fn binParticles(@builtin(global_invocation_id) gid: vec3u) {
   let p = particles[id];
   if (p.state.w < 0.5 || abs(p.position.x) > params.clock.z || abs(p.position.y) > 1.0) { return; }
   if (params.simulation.x > 1.5 && p.extra.y < 0.0) { return; }
-  let gridPos = clamp((p.position.xy / vec2f(params.clock.z, 1.0) * 0.5 + 0.5) * f32(GRID), vec2f(0.0), vec2f(127.999));
-  let cell = vec2u(gridPos);
-  let index = cell.y * GRID + cell.x;
-  atomicAdd(&density[index].count, 1u);
-  atomicAdd(&density[index].x, i32(fract(gridPos.x) * 512.0));
-  atomicAdd(&density[index].y, i32(fract(gridPos.y) * 512.0));
+  let g = densityCoordinate(p.position.xy);
+  let base = densityBase(g);
+  let f = densityFraction(g, base);
+  let index = base.y * GRID + base.x;
+  atomicAdd(&density[index].mass, (32u - f.x) * (32u - f.y));
+  atomicAdd(&density[index + 1u].mass, f.x * (32u - f.y));
+  atomicAdd(&density[index + GRID].mass, (32u - f.x) * f.y);
+  atomicAdd(&density[index + GRID + 1u].mass, f.x * f.y);
 }
+fn densityPressure(node: vec2i, scale: f32) -> f32 {
+  let c = clamp(node, vec2i(0), vec2i(i32(GRID) - 1));
+  return f32(atomicLoad(&density[u32(c.y) * GRID + u32(c.x)].mass)) * scale;
+}
+// Pressure gradient of the density field. Node gradients are central differences, interpolated with
+// the same bilinear weights used for deposition: the force is continuous across cell borders, exactly
+// zero in a uniform cloud, and a particle exerts no force on itself, so no cell-periodic lattice forms.
+// Node values stay linear in density (capping them would pull dense stacks onto nodes). Dividing by the
+// interpolated density, as an isothermal gas does, keeps dense clumps dispersing gently.
 fn separation(q: vec2f, id: u32) -> vec2f {
-  let dimensions = vec2f(params.clock.z * 2.0, 2.0);
-  let cellSize = dimensions / f32(GRID);
-  let cell = vec2i(clamp((q / dimensions + 0.5) * f32(GRID), vec2f(0.0), vec2f(127.999)));
-  let radius = max(cellSize.x, cellSize.y) * 1.5;
-  let typical = max(params.clock.w / f32(GRID * GRID), 1.0);
-  var acceleration = vec2f(0.0);
-  for (var y = -1; y <= 1; y++) {
-    for (var x = -1; x <= 1; x++) {
-      let neighbor = cell + vec2i(x, y);
-      if (any(neighbor < vec2i(0)) || any(neighbor >= vec2i(i32(GRID)))) { continue; }
-      let index = u32(neighbor.y) * GRID + u32(neighbor.x);
-      let n = atomicLoad(&density[index].count);
-      if (n == 0u || (x == 0 && y == 0 && n < 2u)) { continue; }
-      let center = (vec2f(neighbor) + vec2f(f32(atomicLoad(&density[index].x)), f32(atomicLoad(&density[index].y))) / (512.0 * f32(n))) * cellSize - dimensions * 0.5;
-      var delta = q - center;
-      // Deterministic tiny offsets separate exact coincidences without teleporting particles.
-      if (dot(delta, delta) < 0.000001) { let a = rnd(id, 29u) * TAU; delta = vec2f(cos(a), sin(a)) * 0.002; }
-      let d2 = dot(delta, delta);
-      let pressure = min(f32(n) / typical, 12.0) * exp(-d2 / (radius * radius));
-      acceleration += delta / max(sqrt(d2), radius * 0.2) * pressure * 1.8;
-    }
-  }
+  let cellSize = vec2f(max(params.clock.z, 0.01) * 2.0, 2.0) / f32(GRID);
+  let g = densityCoordinate(q);
+  let cell = densityBase(g);
+  let f = vec2f(densityFraction(g, cell)) / 32.0;
+  let base = vec2i(cell);
+  let scale = 1.0 / (NODE_MASS * max(params.clock.w / f32(GRID * GRID), 1.0));
+  // Twelve loads: the four interpolation nodes and the eight neighbours their gradients need.
+  let p00 = densityPressure(base, scale);
+  let p10 = densityPressure(base + vec2i(1, 0), scale);
+  let p01 = densityPressure(base + vec2i(0, 1), scale);
+  let p11 = densityPressure(base + vec2i(1, 1), scale);
+  let g00 = vec2f(p10 - densityPressure(base + vec2i(-1, 0), scale), p01 - densityPressure(base + vec2i(0, -1), scale));
+  let g10 = vec2f(densityPressure(base + vec2i(2, 0), scale) - p00, p11 - densityPressure(base + vec2i(1, -1), scale));
+  let g01 = vec2f(p11 - densityPressure(base + vec2i(-1, 1), scale), densityPressure(base + vec2i(0, 2), scale) - p00);
+  let g11 = vec2f(densityPressure(base + vec2i(2, 1), scale) - p01, densityPressure(base + vec2i(1, 2), scale) - p10);
+  let gradient = mix(mix(g00, g10, f.x), mix(g01, g11, f.x), f.y);
+  let pressure = mix(mix(p00, p10, f.x), mix(p01, p11, f.x), f.y);
+  var acceleration = -gradient * (0.5 * SOUND_SPEED2) / (cellSize * max(pressure, 1.0));
+  // Exactly coincident particles see identical gradients forever; a fixed per-particle direction,
+  // active only well above typical density, lets stacks drift apart without a grid-aligned bias.
+  let a = rnd(id, 29u) * TAU;
+  acceleration += vec2f(cos(a), sin(a)) * 0.05 * clamp(pressure - 2.0, 0.0, 14.0);
   return acceleration * min(1.0, 14.0 / max(length(acceleration), 0.0001));
 }
 
@@ -143,6 +171,17 @@ fn smokeCurl(q: vec3f, t: f32) -> vec3f {
   return f * 0.13;
 }
 
+// Spectral ring sectors match fluid.wgsl: band 0 (bass) at the upper left, higher bands clockwise.
+const SPECTRAL_START = 2.35619449;
+fn spectralLevel(i: u32) -> f32 { return clamp(params.ringLevels[i / 4u][i % 4u], 0.0, 1.0); }
+fn spectralAttack(i: u32) -> f32 { return clamp(params.ringAttacks[i / 4u][i % 4u], 0.0, 1.0); }
+// Level at a direction, interpolated between the two nearest sector centres round the full circle.
+fn spectralLevelAt(radial: vec2f) -> f32 {
+  let s = fract((SPECTRAL_START - atan2(radial.y, radial.x + 0.000001)) / TAU) * 9.0;
+  let i = u32(s) % 9u;
+  return mix(spectralLevel(i), spectralLevel((i + 1u) % 9u), smoothstep(0.0, 1.0, fract(s)));
+}
+
 fn newSmoke(id: u32, mode: f32, warm: bool) -> Particle {
   let key = id ^ pcg(u32(params.clock.x * 71.0));
   let ring = mode > 2.5;
@@ -150,8 +189,10 @@ fn newSmoke(id: u32, mode: f32, warm: bool) -> Particle {
   var source = rnd(key, 32u);
   let spectral = mode > 3.5;
   if (spectral && params.simulation.y > 0.5) {
-    // Stable frequency sectors: low bands left, mids at the top, highs right.
-    source = .5 - f32(id % 7u) / 12.0 + (rnd(key,38u)-.5)*.024;
+    // Stable frequency sectors round the whole ring. A triangular spread overlapping
+    // neighbouring sectors keeps the sheet continuous while each band stays centred.
+    let offset = (rnd(key, 38u) + rnd(key, 39u) - 1.0) * 0.9;
+    source = fract((SPECTRAL_START - (f32(id % 9u) + offset) * TAU / 9.0) / TAU);
   }
   let angle = source * TAU;
   let radial = vec2f(cos(angle), sin(angle));
@@ -185,12 +226,19 @@ fn simulateSmoke(id: u32, old: Particle) -> Particle {
   if (p.state.w < 0.5 || p.state.z != mode || invalid) { p = newSmoke(id, mode, true); }
   if (dt == 0.0) { return p; }
   if (mode > 3.5 && params.simulation.y > 0.5 && p.extra.y < 0.0) {
-    let band=emissionLevel(id % 7u,params.emissionLow,params.emissionHigh);
+    let band=spectralLevel(id % 9u);
+    let attack=spectralAttack(id % 9u);
     let strength=smoothstep(.06,.85,band);
-    let chance=1.0-exp(-strength*strength*strength*dt*5.0);
+    // A dim baseline trickle keeps silent sectors as faint grey smoke, so the ring stays whole.
+    let chance=1.0-exp(-(0.07+strength*strength*strength*5.0)*dt);
     if (rnd(id ^ pcg(u32(t*1000.0)),63u) >= chance) { return p; }
     p.extra.y=0.0;
-    p.velocity=vec4f(p.velocity.xy*(1.0+band*2.0),p.velocity.zw);
+    p.velocity=vec4f(p.velocity.xy*(1.0+band*2.0+attack*strength*1.5),p.velocity.zw);
+    // Births are continuous within the frame. Starting every particle on precisely
+    // the same radius each tick produces visible concentric sampling bands.
+    let subframe = rnd(id ^ pcg(u32(t*1000.0)),64u) * dt;
+    p.position = vec4f(p.position.xyz + p.velocity.xyz * subframe * (0.8 + energy * 0.65),p.position.w);
+    p.extra.y = subframe;
   }
   p.extra.y += dt;
   if (p.extra.y < 0.0) { return p; }
@@ -204,15 +252,18 @@ fn simulateSmoke(id: u32, old: Particle) -> Particle {
     let radius = length(q.xy);
     let radial = q.xy / max(radius, 0.001);
     let pulse = 0.8 + 0.25 * sin(p.extra.x * TAU * 5.0 + t * 0.65);
-    transport = vec3f(radial * (0.22 + bass * 0.22) * pulse, 0.0) + turbulence * smoothstep(0.16, 0.5, radius);
+    // Particle ring: measured bass drives outward speed, independently of treble
+    // or the synthetic idle signal. Keep a slow drift between bass hits.
+    var ringSpeed = 0.22 + bass * 0.22;
+    if (!spectral && params.simulation.y > 0.5) {
+      ringSpeed = 0.18 + pow(bass, 1.25) * (1.25 + params.simulation.z * .45) * clamp(params.simulation.w,.3,3.0);
+    }
+    transport = vec3f(radial * ringSpeed * pulse, 0.0) + turbulence * smoothstep(0.16, 0.5, radius);
     transport += vec3f(-radial.y, radial.x, 0.0) * 0.08;
     if (radius < 0.22) { transport += vec3f(radial * (0.22 - radius) * 5.0, 0.0); }
     if (spectral) {
-      let bands = select(vec3f(0.0), clamp(params.sound.xyz, vec3f(0.0), vec3f(1.0)), params.simulation.y > 0.5);
-      let bassSide = pow(max(0.0, -radial.x), 4.0) * bands.x;
-      let highSide = pow(max(0.0, radial.x), 4.0) * bands.z;
-      let midSide = pow(max(0.0, radial.y), 6.0) * bands.y;
-      let jet = bassSide * 1.7 + highSide * 1.7 + midSide * 1.1;
+      // Each of the nine sectors pushes along its own direction, all the way round the ring.
+      let jet = select(0.0, spectralLevelAt(radial) * 1.6, params.simulation.y > 0.5);
       transport = vec3f(radial * (0.12 + jet * exp(-max(0.0, radius - 0.23) * 1.1)), 0.0);
       transport += turbulence * smoothstep(0.23, 0.48, radius) + vec3f(0.0, 0.09, 0.0);
       // A toroidal eddy rolls the thin emitting sheet over itself. Its spatially
@@ -228,7 +279,8 @@ fn simulateSmoke(id: u32, old: Particle) -> Particle {
     }
   }
   // Relaxation supplies drag and buoyancy while retaining the momentum of hand impulses.
-  v += (transport - v) * (1.0 - exp(-dt * 2.0));
+  let responseRate=select(2.0,12.0,ring && !spectral && params.simulation.y>.5 && length(transport)>length(v));
+  v += (transport - v) * (1.0 - exp(-dt * responseRate));
   var heat = p.state.y * exp(-dt * 2.0);
   for (var j = 0u; j < min(u32(params.display.w), 32u); j++) {
     let f = params.forces[j];
@@ -257,7 +309,9 @@ fn simulateSmoke(id: u32, old: Particle) -> Particle {
   v *= min(1.0, 3.5 / max(length(v), 0.001));
   v=vec3f(mouseVelocity(q.xy,v.xy,params.mouse,dt),v.z);
   q += v * dt * (0.8 + energy * 0.65);
-  if (p.extra.y > p.extra.w || abs(q.x) > params.clock.z * 1.2 || abs(q.y) > 1.3 || abs(q.z) > 1.4) { return newSmoke(id, mode, false); }
+  // The spectral ring recycles at one radius, so wide screens do not stretch the side sectors thin.
+  let escaped = abs(q.x) > params.clock.z * 1.2 || abs(q.y) > 1.3 || (spectral && length(q.xy) > 1.3);
+  if (p.extra.y > p.extra.w || escaped || abs(q.z) > 1.4) { return newSmoke(id, mode, false); }
   return Particle(vec4f(q, 0.0), vec4f(v, p.velocity.w), vec4f(p.state.x, heat, mode, 1.0), p.extra);
 }
 
