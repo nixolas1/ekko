@@ -14,13 +14,14 @@ export class FluidSmoke {
     // Square world-space cells, bounded width on ultrawide displays.
     const h=192,w=Math.max(64,Math.min(512,Math.round(h*aspect/8)*8));
     if(!reset&&this.size?.[0]===w&&this.size?.[1]===h)return;
-    this.textures.forEach(t=>t.destroy());this.textures=[];this.size=[w,h];this.dyeSize=[w*4,h*4];this.index=0;this.pressureIndex=0;this.detailReset=true;
+    this.textures.forEach(t=>t.destroy());this.textures=[];this.size=[w,h];this.velocitySize=[w+1,h+1];this.dyeSize=[w*4,h*4];this.index=0;this.pressureIndex=0;this.detailReset=true;
     const make=(size,format)=>{const t=this.device.createTexture({size,format,usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.STORAGE_BINDING|GPUTextureUsage.COPY_SRC});this.textures.push(t);return {texture:t,view:t.createView()};};
-    this.vel=Array.from({length:3},()=>make(this.size,'rgba16float'));
+    // Store the right/top exterior faces as well as the left/bottom faces.
+    this.vel=Array.from({length:3},()=>make(this.velocitySize,'rgba16float'));
     this.dye=Array.from({length:4},()=>make(this.dyeSize,'rgba16float'));
     this.light=Array.from({length:2},()=>make(this.dyeSize,'rgba16float'));
     this.pressure=Array.from({length:2},()=>make(this.size,'r32float'));
-    this.div=make(this.size,'r32float');this.curl=make(this.size,'r32float');
+    this.div=make(this.size,'r32float');this.curl=make(this.velocitySize,'r32float');
     const group=(pipeline,items)=>this.device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:items.map(([binding,resource])=>({binding,resource}))});
     const U=[0,{buffer:this.engine.uniform}],S=[5,this.engine.sampler];
     this.groups={};
@@ -43,10 +44,10 @@ export class FluidSmoke {
   }
   step(encoder){
     const g=this.groups;
-    this.dispatch(encoder,'advectVelocity',g.advect[this.index]);
-    this.dispatch(encoder,'curl',g.curl);this.dispatch(encoder,'confine',g.confine);this.dispatch(encoder,'divergence',g.div);
+    this.dispatch(encoder,'advectVelocity',g.advect[this.index],this.velocitySize);
+    this.dispatch(encoder,'curl',g.curl,this.velocitySize);this.dispatch(encoder,'confine',g.confine,this.velocitySize);this.dispatch(encoder,'divergence',g.div);
     for(let i=0;i<32;i++){this.dispatch(encoder,'pressure',g.pressure[this.pressureIndex]);this.pressureIndex=1-this.pressureIndex;}
-    this.dispatch(encoder,'project',g.project[this.pressureIndex]);
+    this.dispatch(encoder,'project',g.project[this.pressureIndex],this.velocitySize);
     this.dispatch(encoder,'dyeForward',g.forward[this.index],this.dyeSize);
     this.dispatch(encoder,'dyeBackward',g.backward,this.dyeSize);
     this.dispatch(encoder,'dyeCorrect',g.correct[this.index],this.dyeSize);

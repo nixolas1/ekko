@@ -72,7 +72,7 @@ fn spectralLight(xy: vec2f, response: f32) -> vec4f {
   let speed = length(vel);
   let dir = select(vec2f(0.0, 1.0), vel / max(speed, 0.0001), speed > 0.0001);
   let perp = vec2f(-dir.y, dir.x);
-  let heat = clamp(p.state.y, 0.0, 1.5);
+  let heat = select(clamp(p.state.y, 0.0, 1.5),0.0,mode>8.5);
   let seed = rnd(id, 6u);
   let pixel = 2.0 / max(params.display.z, 1.0);
   let sigmaPx = mix(0.45, 0.65, seed);
@@ -100,7 +100,17 @@ fn spectralLight(xy: vec2f, response: f32) -> vec4f {
   let u = p.extra.x;
   let music = params.simulation.y > 0.5;
   var color = vec3f(0.0);
-  if (mode < 4.5) {
+  if (mode > 8.5) {
+    let ember=p.position.w*(1.0-smoothstep(life*.2,life*.9,age));
+    let warm=ramp3(vec3f(1.0,.85,.45),vec3f(1.0,.4,.06),vec3f(.65,.13,.03),age/life);
+    let cool=ramp3(vec3f(.65,.9,1.0),vec3f(.2,.45,1.0),vec3f(.45,.2,.8),age/life);
+    var lamp=mix(warm,cool,u);
+    if(params.display.x<5.5){lamp=lightPalette(params.display.x,u);}
+    let filament=.45+1.5*threads(rnd(id,41u),13.0,6.0);
+    // A faint continuous trail makes aiming possible between notes. The captured
+    // band level provides the local, lasting light instead of a global music flash.
+    color=(lamp*(.025+ember*.7)+vec3f(1.0,.96,.9)*pow(ember,2.0)*.08)*vary*filament;
+  } else if (mode < 4.5) {
     // Native-resolution subpixel filaments provide the detail the volumetric grid cannot hold.
     // Lit by the sector it was born in (u is its emission angle), so drifting smoke keeps its band.
     let lighting = select(vec3f(0.0), spectralLight(vec2f(cos(u * TAU), sin(u * TAU)), 1.4).rgb, music);

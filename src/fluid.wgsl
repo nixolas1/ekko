@@ -42,10 +42,11 @@ fn value(c: vec2i) -> vec4f { return textureLoad(field, bounded(c, textureDimens
 fn velAt(q: vec2f) -> vec2f {
   // The texture packs staggered components into RG at one texel address. Each
   // component therefore needs its own half-cell offset when sampled at q.
-  let uv = uvOf(q);
-  let halfCell = .5 / vec2f(textureDimensions(velocity));
-  return vec2f(textureSampleLevel(velocity, linearSampler, uv+vec2f(halfCell.x,0),0).x,
-    textureSampleLevel(velocity, linearSampler, uv+vec2f(0,halfCell.y),0).y);
+  let size=vec2f(textureDimensions(velocity));
+  let uv = uvOf(q)*(size-1.0)/size;
+  let halfCell = .5 / size;
+  return vec2f(textureSampleLevel(velocity, linearSampler, uv+vec2f(halfCell.x,0),0.0).x,
+    textureSampleLevel(velocity, linearSampler, uv+vec2f(0,halfCell.y),0.0).y);
 }
 fn rewind(q: vec2f, dt: f32) -> vec2f {
   // Semi-Lagrangian transport asks "where did material at q come from?" and
@@ -54,6 +55,8 @@ fn rewind(q: vec2f, dt: f32) -> vec2f {
   return q - velAt(q - velAt(q) * dt * .5) * dt;
 }
 fn ringMode() -> bool { return params.simulation.x>6.5; }
+fn openSmoke() -> bool { return params.emissionHigh.w>.5; }
+fn openEdges() -> bool { return ringMode() || openSmoke(); }
 fn ringLevel(i:u32) -> f32 { return params.ringLevels[i/4u][i%4u]; }
 fn ringAttack(i:u32) -> f32 { return params.ringAttacks[i/4u][i%4u]; }
 fn sectorDirection(i:u32) -> vec2f {
@@ -84,7 +87,7 @@ fn source(q: vec2f) -> vec4f {
   if(ringMode()){
     for(var i=0u;i<9u;i++){
       let sheet=(dot(q,sectorDirection(i))-ringRadius())/.009;
-      let strength=sectorShape(q,i)*sectorStrength(i)*exp(-sheet*sheet*.5);
+      let strength=sectorShape(q,i)*sectorStrength(i)*select(1.0,emissionMultiplier(ringLevel(i),params.ringLevels[2].y),params.simulation.y>.5)*exp(-sheet*sheet*.5);
       // Full colour spectrum follows frequency. The palette control can still
       // select a narrower colour field, just as in the original smoke modes.
       let colour=lightPalette(params.display.x,f32(i)/8.0);
@@ -97,7 +100,7 @@ fn source(q: vec2f) -> vec4f {
     let d=(q-vec2f(laneX(i),-.8))/vec2f(.045,.035);
     let shape=exp(-dot(d,d)*.5);
     let colour=select(vec3f(.65,.69,.75),lightPalette(params.display.x,u),params.simulation.y>.5);
-    let strength=laneStrength(i);
+    let strength=laneStrength(i)*select(1.0,emissionMultiplier(emissionLevel(i,params.emissionLow,params.emissionHigh),params.ringLevels[2].y),params.simulation.y>.5);
     s+=vec4f(colour*strength*shape*3.5,strength*shape*5.5)*params.tuning.w;
   }
   return s;
@@ -152,11 +155,11 @@ fn nozzleVelocity(q:vec2f) -> vec2f {
 // The resulting velocity can compress/expand locally; projection fixes that later.
 @compute @workgroup_size(8,8) fn advectVelocity(@builtin(global_invocation_id) id: vec3u) {
   let size=textureDimensions(result); if(any(id.xy>=size)){return;}
-  let c=vec2i(id.xy); let h=worldSize()/vec2f(size);
-  let q=worldAt((vec2f(id.xy)+.5)/vec2f(size));
+  let c=vec2i(id.xy); let h=worldSize()/vec2f(size-vec2u(1));
+  let q=worldAt((vec2f(id.xy)+.5)/vec2f(size-vec2u(1)));
   let qx=q-vec2f(h.x*.5,0); let qy=q-vec2f(0,h.y*.5);
   var v=vec2f(velAt(rewind(qx,params.clock.y)).x,velAt(rewind(qy,params.clock.y)).y);
-  let smoke=textureSampleLevel(field,linearSampler,uvOf(q),0);
+  let smoke=textureSampleLevel(field,linearSampler,uvOf(q),0.0);
   let concentration=dot(smoke.rgb,vec3f(1.0/3.0));
   v.y += (smoke.a*select(1.6,.13,ringMode())-concentration*.09)*params.clock.y;
   let src=source(q);
@@ -179,17 +182,17 @@ fn nozzleVelocity(q:vec2f) -> vec2f {
   }
   v *= exp(-params.clock.y*select(.12,.85,ringMode()));
   v=clamp(v,vec2f(-3.0),vec2f(3.0));
-  // Closed side/bottom walls, open top so the plume can leave the domain.
-  if(!ringMode() && (id.x==0u || id.x==size.x-1u)){v.x=0.0;}
-  if(!ringMode() && id.y==0u){v.y=0.0;}
-  if(id.y==size.y-1u){v.y=max(v.y,0.0);}
+  // Optional open boundaries release the side/bottom walls as well as the top.
+  if(!openEdges() && (id.x==0u || id.x==size.x-1u)){v.x=0.0;}
+  if(!openEdges() && id.y==0u){v.y=0.0;}
+  if(!openSmoke() && id.y==size.y-1u){v.y=max(v.y,0.0);}
   textureStore(result,c,vec4f(v,0,0));
 }
 // In 2D, curl is a scalar: dv_y/dx - dv_x/dy measures local rotation and its sign.
 // Central differences approximate these derivatives from neighbouring texels.
 @compute @workgroup_size(8,8) fn curl(@builtin(global_invocation_id) id: vec3u) {
   let size=textureDimensions(scalarResult); if(any(id.xy>=size)){return;}
-  let c=vec2i(id.xy); let h=worldSize()/vec2f(size);
+  let c=vec2i(id.xy); let h=worldSize()/vec2f(size-vec2u(1));
   let w=(value(c+vec2i(1,0)).y-value(c-vec2i(1,0)).y)/(2*h.x)
        -(value(c+vec2i(0,1)).x-value(c-vec2i(0,1)).x)/(2*h.y);
   textureStore(scalarResult,c,vec4f(w,0,0,0));
@@ -200,15 +203,15 @@ fn nozzleVelocity(q:vec2f) -> vec2f {
 // this is a visual compensation for numerical diffusion, not extra resolution.
 @compute @workgroup_size(8,8) fn confine(@builtin(global_invocation_id) id: vec3u) {
   let size=textureDimensions(result); if(any(id.xy>=size)){return;}
-  let c=vec2i(id.xy); let h=worldSize()/vec2f(size);
+  let c=vec2i(id.xy); let h=worldSize()/vec2f(size-vec2u(1));
   let g=vec2f(abs(value(c+vec2i(1,0)).x)-abs(value(c-vec2i(1,0)).x),
               abs(value(c+vec2i(0,1)).x)-abs(value(c-vec2i(0,1)).x));
   let n=g/max(length(g),.00001);
   let w=value(c).x;
   var v=textureLoad(velocity,c,0).xy+vec2f(n.y,-n.x)*w*min(h.x,h.y)*select(1.8,2.5,ringMode())*params.tuning.y*params.clock.y;
   v=clamp(v,vec2f(-3),vec2f(3));
-  if(!ringMode() && (id.x==0u || id.x==size.x-1u)){v.x=0;}
-  if(!ringMode() && id.y==0u){v.y=0;}
+  if(!openEdges() && (id.x==0u || id.x==size.x-1u)){v.x=0;}
+  if(!openEdges() && id.y==0u){v.y=0;}
   textureStore(result,c,vec4f(v,0,0));
 }
 // Outgoing minus incoming face velocity, divided by cell size, measures local
@@ -226,26 +229,40 @@ fn nozzleVelocity(q:vec2f) -> vec2f {
 // Here p is a velocity-correction potential with timestep/density factors absorbed.
 // fluid.js runs 32 iterations and retains pressure between frames as a warm start:
 // fixed work gives approximate incompressibility, not an exactly converged solve.
-// Zero pressure on open edges lets smoke leave; clamped reads handle other edges.
+// Ambient pressure at open faces lets smoke leave; walls impose zero flux.
 @compute @workgroup_size(8,8) fn pressure(@builtin(global_invocation_id) id: vec3u) {
   let size=textureDimensions(scalarResult); if(any(id.xy>=size)){return;}
   let c=vec2i(id.xy); let h=worldSize()/vec2f(size); let a=1.0/(h*h);
-  let neighbours=(value(c-vec2i(1,0)).x+value(c+vec2i(1,0)).x)*a.x
-    +(value(c-vec2i(0,1)).x+value(c+vec2i(0,1)).x)*a.y;
-  var p=(neighbours-textureLoad(auxiliary,c,0).x)/(2.0*(a.x+a.y));
-  if(id.y==size.y-1u || (ringMode() && (id.x==0u || id.x==size.x-1u || id.y==0u))){p=0.0;}
+  // Pressure lives at cell centres. At an open face the ambient pressure is
+  // zero half a cell away; closed faces contribute no flux. Treat left/right
+  // identically instead of pinning edge cells while omitting the last face.
+  var neighbours=0.0;var diagonal=0.0;
+  let offsets=array<vec2i,4>(vec2i(-1,0),vec2i(1,0),vec2i(0,-1),vec2i(0,1));
+  for(var i=0u;i<4u;i++){
+    let n=c+offsets[i];let weight=select(a.x,a.y,i>=2u);
+    if(all(n>=vec2i(0)) && all(n<vec2i(size))){neighbours+=value(n).x*weight;diagonal+=weight;}
+    else if(openEdges() || n.y>=i32(size.y)){diagonal+=2.0*weight;}
+  }
+  let p=(neighbours-textureLoad(auxiliary,c,0).x)/diagonal;
   textureStore(scalarResult,c,vec4f(p,0,0,0));
+}
+// Mirror the interior pressure across an ambient (zero-pressure) face, or
+// copy it across a wall. This supplies both exterior faces of the MAC grid.
+fn facePressure(c:vec2i) -> f32 {
+  let size=vec2i(textureDimensions(field));
+  let outside=any(c<vec2i(0)) || any(c>=size);
+  return value(c).x*select(1.0,-1.0,outside && (openEdges() || c.y>=size.y));
 }
 // Subtract the pressure gradient at each face to reduce divergence. Some artistic
 // interactions are deliberately applied afterwards and can reintroduce divergence;
 // this preserves the visible suction/push behaviour rather than strict fluid physics.
 @compute @workgroup_size(8,8) fn project(@builtin(global_invocation_id) id: vec3u) {
   let size=textureDimensions(result); if(any(id.xy>=size)){return;}
-  let c=vec2i(id.xy); let h=worldSize()/vec2f(size); let p=value(c).x;
-  var v=textureLoad(velocity,c,0).xy-vec2f(p-value(c-vec2i(1,0)).x,p-value(c-vec2i(0,1)).x)/h;
-  if(!ringMode() && (id.x==0u || id.x==size.x-1u)){v.x=0.0;}
-  if(!ringMode() && id.y==0u){v.y=0.0;}
-  let q=worldAt((vec2f(id.xy)+.5)/vec2f(size));
+  let c=vec2i(id.xy); let h=worldSize()/vec2f(size-vec2u(1)); let p=facePressure(c);
+  var v=textureLoad(velocity,c,0).xy-vec2f(p-facePressure(c-vec2i(1,0)),p-facePressure(c-vec2i(0,1)))/h;
+  if(!openEdges() && (id.x==0u || id.x==size.x-1u)){v.x=0.0;}
+  if(!openEdges() && id.y==0u){v.y=0.0;}
+  let q=worldAt((vec2f(id.xy)+.5)/vec2f(size-vec2u(1)));
   // Magical suction/push must survive the pressure solve, which otherwise
   // cancels radial forces. Apply bounded local drift just like the mouse obstacle.
   for(var j=0u;j<min(u32(params.display.w),32u);j++){
@@ -270,7 +287,12 @@ fn dye(q: vec2f) -> vec4f {
   // the last edge texel indefinitely into backtraces that leave the simulation.
   let uv=uvOf(q);
   if(any(uv<vec2f(0))||any(uv>vec2f(1))){return vec4f(0);}
-  return textureSampleLevel(field,linearSampler,uv,0);
+  return textureSampleLevel(field,linearSampler,uv,0.0);
+}
+// Open air carries no dye into the domain, including the correction stencil.
+fn donor(c: vec2i) -> vec4f {
+  if(openSmoke() && (any(c<vec2i(0)) || any(c>=vec2i(textureDimensions(field))))){return vec4f(0);}
+  return value(c);
 }
 // MacCormack transport uses three passes to counter interpolation blur:
 // forward moves old dye through dt; backward transports that result through -dt;
@@ -293,15 +315,20 @@ fn dye(q: vec2f) -> vec4f {
   // halos or negative concentrations at sharp edges. Heat then cools faster than dye.
   let size=textureDimensions(result); if(any(id.xy>=size)){return;}
   let c=vec2i(id.xy); let q=worldAt((vec2f(id.xy)+.5)/vec2f(size));
-  let pos=uvOf(rewind(q,params.clock.y))*vec2f(size)-.5; let cell=vec2i(floor(pos));
-  let a=value(cell);let b=value(cell+vec2i(1,0));let d=value(cell+vec2i(0,1));let e=value(cell+vec2i(1,1));
+  let departure=uvOf(rewind(q,params.clock.y));
+  let pos=departure*vec2f(size)-.5; let cell=vec2i(floor(pos));
+  let a=donor(cell);let b=donor(cell+vec2i(1,0));let d=donor(cell+vec2i(0,1));let e=donor(cell+vec2i(1,1));
   let lo=min(min(a,b),min(d,e));let hi=max(max(a,b),max(d,e));
   let corrected=textureLoad(auxiliary,c,0)+.5*(value(c)-textureLoad(original,c,0));
   // Limited MacCormack correction retains fine edges without negative density or ringing.
   var smoke=clamp(corrected,lo,hi)*exp(-params.clock.y*vec4f(.15,.15,.15,.5));
+  // At an exterior departure point use the forward pass (empty air), so the
+  // correction cannot resurrect smoke that has already escaped.
+  if(openSmoke() && (any(departure<vec2f(0)) || any(departure>vec2f(1)))){smoke=vec4f(0);}
   smoke+=source(q)*params.clock.y;
   let uv=(vec2f(id.xy)+.5)/vec2f(size);
   smoke*=smoothstep(0.0,.025,uv.x)*smoothstep(0.0,.025,1.0-uv.x)*smoothstep(0.0,.025,1.0-uv.y);
+  if(openSmoke()){smoke*=smoothstep(0.0,.025,uv.y);}
   if(ringMode()){smoke*=smoothstep(ringRadius()*.62,ringRadius()*.87,length(q))*smoothstep(0.0,.025,uv.y);}
   textureStore(result,c,clamp(smoke,vec4f(0),vec4f(8)));
 }
@@ -333,7 +360,7 @@ fn dye(q: vec2f) -> vec4f {
   let life=2.8+rnd(id.x,81u)*2.2;
   if(p.state.w<.5 || p.state.z!=7.0){p=Particle(vec4f(0),vec4f(0),vec4f(0,0,7,1),vec4f(f32(band)/8.0,-.001,0,life));}
   if(p.extra.y<0.0){
-    let strength=sectorStrength(band);
+    let strength=sectorStrength(band)*select(1.0,emissionMultiplier(ringLevel(band),params.ringLevels[2].y),params.simulation.y>.5);
     if(rnd(key,82u)>1.0-exp(-strength*params.tuning.w*dt*4.0)){detailParticles[id.x]=p;return;}
     let n=sectorDirection(band);let tangent=vec2f(-n.y,n.x);
     let across=(rnd(key,83u)+rnd(key,84u)-1.0)*.052;
@@ -360,14 +387,14 @@ struct FluidVertex { @builtin(position) position: vec4f, @location(0) uv: vec2f 
   // opacity, and one offset density sample suggests directional edge lighting.
   // This avoids a volume raymarch for the fluid modes. Output is opaque HDR RGB;
   // the local alpha variable shapes brightness rather than framebuffer blending.
-  let s=textureSampleLevel(field,linearSampler,input.uv,0);
+  let s=textureSampleLevel(field,linearSampler,input.uv,0.0);
   let concentration=max(s.r,max(s.g,s.b));
   let h=1.0/vec2f(textureDimensions(field));
-  let near=textureSampleLevel(field,linearSampler,input.uv+vec2f(-h.x,h.y)*2.0,0).rgb;
+  let near=textureSampleLevel(field,linearSampler,input.uv+vec2f(-h.x,h.y)*2.0,0.0).rgb;
   let edge=clamp((concentration-max(near.r,max(near.g,near.b)))*.8,-.25,.45);
   let alpha=(1.0-exp(-concentration*2.4))*smoothstep(.012,.09,concentration);
   let hue=s.rgb/max(concentration,.0001);
-  let emission=textureSampleLevel(auxiliary,linearSampler,input.uv,0).rgb;
+  let emission=textureSampleLevel(auxiliary,linearSampler,input.uv,0.0).rgb;
   let peak=max(emission.r,max(emission.g,emission.b));
   // Keep the fine MacCormack density edges in the light: the transported lamp
   // field controls energy, while the sharper dye supplies the visible structure.

@@ -34,15 +34,17 @@ struct Parameters {
   forceVel: array<vec4f, 32>, // smoothed velocity xy, Wand/Vortex blend weights zw
   simulation: vec4f, // mode (see below), audible input active, onset envelope, audio response gain
   emissionLow: vec4f, // seven measured bands: bass to treble
-  emissionHigh: vec4f,
-  ringLevels: array<vec4f,3>, // nine ascending frequency bands
+  emissionHigh: vec4f, // xyz: last three bands; w: fluid smoke open boundaries
+  ringLevels: array<vec4f,3>, // nine ascending frequency bands; [2].y: spectrum emission response
   ringAttacks: array<vec4f,3>, // independently decaying note attacks
   mouse: vec4f, // world xy, radius, active
   tuning: vec4f, // speed, turbulence, glow, emission
+  sources: array<vec4f,9>, // xy origin, zw unit aim
+  sourceBands: array<vec4f,9>, // band position, level, active, reserved
 }
 // Shader mode numbers differ from the UI's flowMode: 0 sculpture, 1 persistent,
 // 2 fluid smoke, 3 particle ring, 4 spectral volume, 5 plume, 6 twin vortices,
-// 7 fluid ring, 8 lasting-glow plume. gpu.js routes 2/7 to fluid.js instead of
+// 7 fluid ring, 8 lasting-glow plume, 9 hand fire. gpu.js routes 2/7 to fluid.js instead of
 // the particle compute pass; mode 7 shares the reference particle renderer.
 const TAU = 6.2831853;
 // Integer hashing gives reproducible variation without a random-state buffer.
@@ -125,4 +127,10 @@ fn gestureFlow(base:vec2f,delta:vec2f,radius:f32,motion:vec2f,weights:vec2f)->ve
   let orbit=max(radius*.42,.06);
   let vortex=n*clamp((d-orbit)*5.0,-1.2,1.2)+tangent*2.6*smoothstep(0.0,orbit*.35,d)+motion*.65;
   return base*max(0.0,1.0-weights.x-weights.y)+wand*weights.x+vortex*weights.y;
+}
+
+// A neutral multiplier at half activity; a bounded quiet trickle preserves the
+// continuous smoke modes. Exponent zero disables the extra spectrum response.
+fn emissionMultiplier(level: f32, response: f32) -> f32 {
+  return pow(max(.25,clamp(level,0.0,1.0)*2.0),response);
 }

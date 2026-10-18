@@ -21,6 +21,7 @@ export function settingsFromURL(href,saved={}){
   for(const [key,[lo,hi]] of Object.entries(MODE_TUNING)){
     const raw=q.get(key),v=Number(raw);if(raw!==null&&raw!==''&&Number.isFinite(v)&&v>=lo&&v<=hi)out.modeSettings[out.physicsMode][key]=v;
   }
+  if(out.physicsMode==='smoke'&&['0','1'].includes(q.get('openBoundaries')))out.modeSettings.smoke.openBoundaries=q.get('openBoundaries')==='1';
   out.pushPower=out.pullPower;out.audio.playing=false;out.paused=null;return out;
 }
 export function settingsURL(href,settings){
@@ -30,6 +31,7 @@ export function settingsURL(href,settings){
     url.searchParams.set(key,type==='boolean'?(s[field]?'1':'0'):String(s[field]));
   }
   for(const key of Object.keys(MODE_TUNING))url.searchParams.set(key,String(s.modeSettings[s.physicsMode][key]));
+  if(s.physicsMode==='smoke')url.searchParams.set('openBoundaries',s.modeSettings.smoke.openBoundaries?'1':'0');else url.searchParams.delete('openBoundaries');
   for(const obsolete of ['pull','push','paused','playing'])url.searchParams.delete(obsolete);
   if(s.audio.kind==='youtube'&&s.audio.youtube)url.searchParams.set('youtube',s.audio.youtube);else url.searchParams.delete('youtube');
   url.searchParams.set('song',s.audio.track);url.searchParams.set('source',s.audio.kind);

@@ -9,6 +9,7 @@ import { Tracking } from './tracking';
 import { HandForces, handForce } from './interactions';
 import { HandOverlay } from './hand-overlay';
 import { MotionTrack } from './motion';
+import { Emitters } from './emitters';
 import { mouseHandForce } from './mouse-hand';
 import {forceFromSlider,sliderFromForce} from './force-controls';
 import { AdaptiveQuality } from './performance';
@@ -31,6 +32,8 @@ const showcaseView=new ShowcaseView(showcaseAction);
 const pointerMotion=new MotionTrack({maxPrediction:24});
 const mouseHand={x:0,y:0,active:false,held:false,metaKey:false};
 const modeSettings=settings.modeSettings;
+const emitters=new Emitters();
+const emitterMarkers=Array.from({length:9},()=>{const node=document.createElement("div");node.className="emitter-marker";node.hidden=true;node.setAttribute("aria-hidden","true");node.innerHTML="<i>↑</i><span></span>";document.body.append(node);return node;});
 // Playback and scene pause are session-only; links never restore a frozen scene.
 let paused=matchMedia('(prefers-reduced-motion: reduce)').matches;
 let pullPower=settings.pullPower,pushPower=settings.pullPower,pointSize=settings.pointSize;
@@ -219,25 +222,31 @@ async function restoreAudio(){
 }
 $('sensitivity').value=String(sound.gain);$('sensitivity-value').textContent=`${sound.gain.toFixed(1)}×`;
 $('sensitivity').oninput=e=>{sound.gain=Number(e.target.value);$('sensitivity-value').textContent=`${sound.gain.toFixed(1)}×`;persist();};
-const modeNames={'fluid-ring':'Fluid ring','plume-glow':'Smoke light · lasting glow',plume:'Smoke light · original',duet:'Fire & ice',smoke:'Fluid smoke',ring:'Particle ring',spectral:'Spectral smoke',persistent:'Airbender',sculpture:'Light shapes'};
+const modeNames={'fluid-ring':'Fluid ring','plume-glow':'Smoke light · lasting glow',plume:'Smoke light · original',duet:'Fire & ice','hand-fire':'Hand fire & ice',smoke:'Fluid smoke',ring:'Particle ring',spectral:'Spectral smoke',persistent:'Airbender',sculpture:'Light shapes'};
 function modeUI(){
-  engine.persistent=physicsMode==='persistent';engine.flowMode=({'fluid-ring':6,'plume-glow':7,smoke:1,ring:2,spectral:3,plume:4,duet:5})[physicsMode]||0;
+  engine.persistent=physicsMode==='persistent';engine.flowMode=({'fluid-ring':6,'plume-glow':7,smoke:1,ring:2,spectral:3,plume:4,duet:5,'hand-fire':8})[physicsMode]||0;
   document.querySelectorAll('[data-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.mode===physicsMode)));
   $('effect').hidden=physicsMode!=='sculpture';$('effect-label').hidden=physicsMode!=='sculpture';
-  $('mode-description').textContent={'fluid-ring':'Nine outward smoke jets. Bass starts at the upper left; higher frequencies follow clockwise.','plume-glow':'Always-smoking ribbons. Notes light up new smoke; each patch carries its glow, then fades.',plume:'The original luminous smoke ribbons, with music-driven flashes.',duet:'Twin streams of warm and cool light, shaped by your hands and music.',spectral:'A full-circle smoke ring. Bass starts at the upper left; higher frequencies follow clockwise.',smoke:'Bass hits fire upward from the left; higher notes feed the lanes to the right. Stir the smoke with your hands.',ring:'Outward-flowing particles accelerate with bass intensity. Bend the streams with your hands.',persistent:'Gather light in a closed hand. Open your hand to send it flying.',sculpture:'Music shapes the light. Your hands pull and push it.'}[physicsMode];
+  $('mode-description').textContent={'fluid-ring':'Nine outward smoke jets. Bass starts at the upper left; higher frequencies follow clockwise.','plume-glow':'Always-smoking ribbons. Notes light up new smoke; each patch carries its glow, then fades.',plume:'The original luminous smoke ribbons, with music-driven flashes.',duet:'Twin streams of warm and cool light, shaped by your hands and music.','hand-fire':'Point to emit and aim from your fingertip. Move the mouse to emit; it stops after 5 seconds idle. Other gestures gather, push and stir as usual. One source gets bass; more spread to treble. Each note lights new smoke and its glow fades as it drifts.',spectral:'A full-circle smoke ring. Bass starts at the upper left; higher frequencies follow clockwise.',smoke:'Bass hits fire upward from the left; higher notes feed the lanes to the right. Stir the smoke with your hands.',ring:'Outward-flowing particles accelerate with bass intensity. Bend the streams with your hands.',persistent:'Gather light in a closed hand. Open your hand to send it flying.',sculpture:'Music shapes the light. Your hands pull and push it.'}[physicsMode];
+  const movementHelp=$('movement-help');movementHelp.dataset.defaultText??=movementHelp.textContent;
+  movementHelp.textContent=physicsMode==='hand-fire'?'Only pointing hands emit, aimed along the index finger. Fists gather, open palms push, pinches form a Wand and two fingers stir a Vortex. The mouse emits while active, stopping after 5 seconds idle; click and hold to push, or Command-hold to gather.':movementHelp.dataset.defaultText;
   $('particles').disabled=['smoke','fluid-ring'].includes(physicsMode);countUI();modeSettingsUI();
 }
 function modeSettingsUI(){
  engine.modeSettings=modeSettings[physicsMode];
  $('mode-settings-label').textContent=modeNames[physicsMode]+' settings';
- for(const key of ['speed','glow','turbulence','emission','visibility']){
-  const value=engine.modeSettings[key];$('mode-'+key).value=value;$('mode-'+key+'-value').textContent=value.toFixed(2)+'×';
+ for(const key of ['speed','glow','turbulence','emission','spectrumEmission','visibility']){
+  const value=engine.modeSettings[key];$('mode-'+key).value=value;$('mode-'+key+'-value').textContent=key==='spectrumEmission'&&value===0?'Off':value.toFixed(2)+'×';
  }
- $('mode-turbulence-control').hidden=!['smoke','fluid-ring'].includes(physicsMode);
- $('mode-emission-control').hidden=!['smoke','fluid-ring','plume','plume-glow'].includes(physicsMode);
+ $('mode-turbulence-control').hidden=!['smoke','fluid-ring','hand-fire'].includes(physicsMode);
+ $('mode-emission-control').hidden=!['smoke','fluid-ring','plume','plume-glow','spectral','ring','duet','hand-fire'].includes(physicsMode);
+ $('mode-spectrumEmission-control').hidden=$('mode-emission-control').hidden;
+ $('mode-open-boundaries-control').hidden=physicsMode!=='smoke';
+ $('mode-open-boundaries').checked=engine.modeSettings.openBoundaries===true;
  $('mode-visibility-control').hidden=!['persistent','sculpture'].includes(physicsMode);
 }
-for(const key of ['speed','glow','turbulence','emission','visibility'])$('mode-'+key).oninput=e=>{modeSettings[physicsMode][key]=Number(e.target.value);modeSettingsUI();engine.dirty=true;persist();};
+for(const key of ['speed','glow','turbulence','emission','spectrumEmission','visibility'])$('mode-'+key).oninput=e=>{modeSettings[physicsMode][key]=Number(e.target.value);modeSettingsUI();engine.dirty=true;persist();};
+$('mode-open-boundaries').onchange=e=>{modeSettings.smoke.openBoundaries=e.target.checked;engine.dirty=true;persist();};
 const settingsPanel=document.querySelector('.panel');
 let pointerIdleTimer,settingsPeekTimer;
 function setSettingsPeek(open){
@@ -337,7 +346,7 @@ addEventListener('keydown',e=>{
 // Tour settings are temporary. Only the explicit Try action saves a chapter.
 function applyShowcaseChapter(){
   const chapter=showcase.chapter;physicsMode=chapter.mode;engine.palette=chapter.palette;engine.effect=0;
-  modeSettings[physicsMode]={speed:1,glow:1.6,turbulence:1.15,emission:1.65,visibility:1};
+  modeSettings[physicsMode]={speed:1,glow:1.6,turbulence:1.15,emission:1.65,spectrumEmission:1,visibility:1};
   engine.dirty=true;adaptiveQuality.reset();modeUI();paletteUI();
   // Drop queued input from the preceding chapter, especially when paused/skipping.
   engine.pending.length=0;engine.mouse=[0,0,.18,0];
@@ -463,13 +472,16 @@ function frame(now){
     const pointer=demo.pointer;engine.mouse=pointer&&!pointer.held?[pointer.x,pointer.y,.18,1]:[0,0,.18,0];
   }
   const hands=demo?demo.hands:tracker.active?handForces.sample(now):[];
-  handMarkers.forEach((node,index)=>{const hand=hands[index];node.hidden=!hand;if(hand){node.style.left=`${(hand.x/(innerWidth/innerHeight)+1)*50}%`;node.style.top=`${(1-hand.y)*50}%`;node.classList.toggle('repel',hand.mode<0);node.firstChild.textContent=gestureLabels[hand.gesture]||'Gather';}});
+  handMarkers.forEach((node,index)=>{const hand=hands[index];node.hidden=!hand||(physicsMode==='hand-fire'&&hand.gesture==='point');if(hand){node.style.left=`${(hand.x/(innerWidth/innerHeight)+1)*50}%`;node.style.top=`${(1-hand.y)*50}%`;node.classList.toggle('repel',hand.mode<0);node.firstChild.textContent=gestureLabels[hand.gesture]||'Gather';}});
   const activeSound=showcase.active?showcaseSource||showcaseSound:sound;
   engine.musicActive=activeSound.mode==='mic'||activeSound.mode==='tab'||(activeSound.mode==='file'&&!!activeSound.element&&!activeSound.element.paused);
   const audio=activeSound.sample(now/1000);engine.audioResponse=activeSound.gain;engine.musicTransient=activeSound.transient;engine.emissionBands=activeSound.emissionBands;engine.ringBands=activeSound.ringSpectrum.levels;engine.ringAttacks=activeSound.ringSpectrum.attacks;audio[3]=Math.max(audio[3],activeSound.transient*.8);
   // Hand pull/push is separate from the mouse obstacle; body joints never attract.
-  const forces=hands.map(hand=>handForce(hand,engine.persistent,pullPower,pushPower,pointSize));
+  const forces=hands.filter(hand=>physicsMode!=='hand-fire'||hand.gesture!=='point').map(hand=>handForce(hand,engine.persistent,pullPower,pushPower,pointSize));
   const mouseForce=mouseHandForce(demo?demo.pointer:mouseHand,engine.persistent,pullPower,pushPower);if(mouseForce)forces.push(mouseForce);
+  engine.emitters=emitters.sample(physicsMode==='hand-fire'?hands:[],physicsMode==='hand-fire'?mouseHand:null,now);
+  if(physicsMode==='hand-fire')engine.mouse=[0,0,.18,0];
+  emitterMarkers.forEach((node,i)=>{const source=engine.emitters[i];node.hidden=!source;if(source){node.style.left=`${(source.x/(innerWidth/innerHeight)+1)*50}%`;node.style.top=`${(1-source.y)*50}%`;node.style.setProperty('--aim',`${Math.atan2(source.direction[0],source.direction[1])}rad`);node.style.setProperty('--source-color',`hsl(${30+source.band*200} 90% 78%)`);node.lastChild.textContent=source.band===0?'Bass':source.band===1?'Treble':'Mid';}});
   const scenePaused=showcase.active?(showcase.paused||showcase.complete||showcaseStarting):paused;
   if(autoCount&&!scenePaused&&!['smoke','fluid-ring'].includes(physicsMode)){const quality=adaptiveQuality.update(dt,engine.count,engine.renderScale,tracker.active&&tracker.backend==='GPU'?tracker.ms:0);if(quality){engine.count=quality.count;engine.renderScale=engine.resolution==='auto'?quality.scale:1;countUI();}}
   engine.frame(dt,audio,forces,scenePaused);frames.push(dt*1000);if(frames.length>90)frames.shift();

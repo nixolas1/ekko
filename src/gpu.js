@@ -11,7 +11,7 @@ const MAX_PARTICLES=3145728,PARTICLE_BYTES=64,MAX_FORCES=32,MAX_BURSTS=8,MAX_QUE
 // Spectral smoke volume: grid mirrors VX/VY/VZ in volume.wgsl. At most VOLUME_SPLATS particles are splatted per
 // frame (every stride-th one, weighted up), which bounds both the atomic cost and the fixed point range.
 const VOLUME_GRID=[96,64,48],VOLUME_SPLATS=262144,VOLUME_DEPTH=.8,CAMERA_DISTANCE=1/.35,SPECTRAL_MODE=4;
-const UNIFORM_FLOATS=356; // layout mirrors Parameters in common-shader.wgsl
+const UNIFORM_FLOATS=428; // layout mirrors Parameters in common-shader.wgsl
 const SCENE_FORMAT='rgba16float';
 const PREFIX=commonCode+'\n',PREFIX_LINES=PREFIX.split('\n').length-1;
 const clamp=(v,lo,hi)=>Math.min(hi,Math.max(lo,v));
@@ -233,7 +233,7 @@ export class ParticleEngine {
     const velocities=paused?this.tracked:this.trackForces(list,real);
     const before=this.served;
     if (drained.length) this.served=drained[drained.length-1].serial;
-    const mode=this.flowMode===1?2:this.flowMode===2?3:this.flowMode===3?SPECTRAL_MODE:this.flowMode===4?5:this.flowMode===5?6:this.flowMode===6?7:this.flowMode===7?8:this.persistent?1:0;
+    const mode=this.flowMode===1?2:this.flowMode===2?3:this.flowMode===3?SPECTRAL_MODE:this.flowMode===4?5:this.flowMode===5?6:this.flowMode===6?7:this.flowMode===7?8:this.flowMode===8?9:this.persistent?1:0;
     const smoke=mode===SPECTRAL_MODE;
     if (smoke&&!this.volumeGroups) this.buildVolumeTargets();
     const modeChanged=mode!==this.lastMode;
@@ -259,11 +259,19 @@ export class ParticleEngine {
     d.set([mode,this.musicActive?1:0,clamp(Number(this.musicTransient)||0,0,1),clamp(Number(this.audioResponse)||1.2,.3,3)],312);
     const emission=this.emissionBands||[audio?.[0],audio?.[0],audio?.[1],audio?.[1],audio?.[1],audio?.[2],audio?.[2]];
     d.set(Array.from({length:7},(_,i)=>clamp(Number(emission[i])||0,0,1)),316);
+    d[323]=mode===2&&tuning.openBoundaries===true?1:0;
     const ring=this.ringBands||[emission[0],emission[1],emission[2],emission[3],emission[4],emission[4],emission[5],emission[6],emission[6]];
     d.set(Array.from({length:9},(_,i)=>clamp(Number(ring[i])||0,0,1)),324);
+    d[333]=clamp(Number.isFinite(tuning.spectrumEmission)?tuning.spectrumEmission:1,0,2);
     d.set(Array.from({length:9},(_,i)=>clamp(Number(this.ringAttacks?.[i])||0,0,1)),336);
     d.set(this.mouse||[0,0,.18,0],348);
     d.set([speed,...['turbulence','glow','emission'].map(key=>clamp(Number.isFinite(tuning[key])?tuning[key]:1,0,3))],352);
+    (this.emitters||[]).slice(0,9).forEach((source,i)=>{
+      const band=clamp(Number(source.band)||0,0,1),at=band*8,lo=Math.floor(at),hi=Math.min(8,lo+1);
+      const level=(Number(ring[lo])||0)*(1-at+lo)+(Number(ring[hi])||0)*(at-lo);
+      d.set([source.x,source.y,...source.direction],356+i*4);
+      d.set([band,clamp(level,0,1),1,0],392+i*4);
+    });
     drained.forEach((b,i)=>d.set([b.x,b.y,b.serial,b.strength],152+i*4));
     device.queue.writeBuffer(this.uniform,0,d);
     const stride=Math.ceil(count/VOLUME_SPLATS);

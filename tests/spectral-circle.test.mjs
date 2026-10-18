@@ -118,8 +118,8 @@ test('lighting is one function in both renderers and uses all nine levels, not t
 
 test('silent sectors keep a dim baseline trickle while active sectors emit far faster', () => {
   const simulate = functionBody(particles, 'simulateSmoke');
-  assert.match(simulate, /let band=spectralLevel\(id % 9u\);/);
-  const rateText = simulate.match(/let chance=1\.0-exp\(-\((.+)\)\*dt\);/)[1];
+  assert.match(simulate, /spectralLevel\(id % 9u\)/);
+  const rateText = simulate.match(/let rate=select\(1\.8,(.+),params\.simulation\.y>\.5\);/)[1];
   const rate = compile(rateText, ['strength']);
   const smoothstep = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
   const strength = level => smoothstep(.06, .85, level);

@@ -232,12 +232,13 @@ fn newSmoke(id: u32, mode: f32, warm: bool) -> Particle {
   }
   // Short staggered waits change the actual birth rate with music, without buffer allocation.
   var age = -rnd(key, 36u) * 1.4 / (0.35 + params.sound.w * 2.0);
-  if (warm && !(spectral && params.simulation.y > 0.5)) {
+  let gated = params.simulation.y > 0.5 || params.tuning.w != 1.0;
+  if (warm && !gated) {
     age = rnd(id, 37u) * life * 0.8;
     // Distributed warm start avoids concentrating the entire pool into one density cell.
     origin += velocity * age + smokeCurl(origin * 1.4, params.clock.x - age * 0.2) * age * 0.12;
   }
-  if (spectral && params.simulation.y > 0.5) { age = -0.001; }
+  if (gated) { age = -0.001; }
   return Particle(vec4f(origin, 0.0), vec4f(velocity, rnd(id, 6u)), vec4f(params.burst.z, 0.0, mode, 1.0), vec4f(source, age, 0.0, life));
 }
 
@@ -252,14 +253,16 @@ fn simulateSmoke(id: u32, old: Particle) -> Particle {
   let invalid = !all(abs(p.position.xyz) < vec3f(8.0)) || !all(abs(p.velocity.xyz) < vec3f(60.0));
   if (p.state.w < 0.5 || p.state.z != mode || invalid) { p = newSmoke(id, mode, true); }
   if (dt == 0.0) { return p; }
-  if (mode > 3.5 && params.simulation.y > 0.5 && p.extra.y < 0.0) {
-    let band=spectralLevel(id % 9u);
+  if ((params.simulation.y > 0.5 || params.tuning.w != 1.0) && p.extra.y < 0.0) {
+    let band=select(clamp(params.sound.w,0.0,1.0),spectralLevel(id % 9u),mode>3.5);
     let attack=spectralAttack(id % 9u);
     let strength=smoothstep(.06,.85,band);
     // A dim baseline trickle keeps silent sectors as faint grey smoke, so the ring stays whole.
     // 1-exp(-rate*dt) is the probability of an event during this time interval.
     // It makes the emission rate less dependent on how many frames are rendered.
-    let chance=1.0-exp(-(0.07+strength*strength*strength*5.0)*dt);
+    let response=select(1.0,emissionMultiplier(band,params.ringLevels[2].y),params.simulation.y>.5);
+    let rate=select(1.8,0.07+strength*strength*strength*5.0,params.simulation.y>.5);
+    let chance=1.0-exp(-rate*params.tuning.w*response*dt);
     if (rnd(id ^ pcg(u32(t*1000.0)),63u) >= chance) { return p; }
     p.extra.y=0.0;
     p.velocity=vec4f(p.velocity.xy*(1.0+band*2.0+attack*strength*1.5),p.velocity.zw);
@@ -354,6 +357,7 @@ fn simulate(@builtin(global_invocation_id) gid: vec3u) {
   var p = particles[id];
   // Mode is uniform across the dispatch, so all active invocations take the
   // same major branch. Fluid modes bypass this entry point in gpu.js entirely.
+  if (params.simulation.x > 8.5) { particles[id] = simulateHandFire(id, p); return; }
   if (params.simulation.x > 4.5) { particles[id] = simulateReference(id, p); return; }
   if (params.simulation.x > 1.5) { particles[id] = simulateSmoke(id, p); return; }
   let t = params.clock.x;

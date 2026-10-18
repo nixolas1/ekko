@@ -18,7 +18,7 @@ export function normalizeSettings(value={}){
     palette:[0,1,2,3,4,5,6].includes(s.palette)?s.palette:0,
     effect:[0,1,2,3].includes(s.effect)?s.effect:0,
     persistent:typeof s.persistent==='boolean'?s.persistent:true,
-    physicsMode:['fluid-ring','plume-glow','smoke','ring','spectral','plume','duet','persistent','sculpture'].includes(s.physicsMode)?s.physicsMode:'smoke',
+    physicsMode:['fluid-ring','plume-glow','smoke','ring','spectral','plume','duet','hand-fire','persistent','sculpture'].includes(s.physicsMode)?s.physicsMode:'smoke',
     modeSettings:normalizeModeSettings(s.modeSettings),
     gain:Number.isFinite(s.gain)?Math.max(.3,Math.min(3,s.gain)):1.2,
     paused:null,
@@ -44,13 +44,14 @@ export async function loadMusicFile(){
   try{return await new Promise((resolve,reject)=>{const request=db.transaction('files').objectStore('files').get('last');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});}finally{db.close();}
 }
 
-export const MODE_TUNING={speed:[.25,2],glow:[0,3],turbulence:[0,2],emission:[0,3],visibility:[.25,4]};
+export const MODE_TUNING={speed:[.25,2],glow:[0,3],turbulence:[0,2],emission:[0,3],spectrumEmission:[0,2],visibility:[.25,4]};
 export function normalizeModeSettings(value={}){
  const result={};
- for(const mode of ['fluid-ring','plume-glow','smoke','ring','spectral','plume','duet','persistent','sculpture']){
+ for(const mode of ['fluid-ring','plume-glow','smoke','ring','spectral','plume','duet','hand-fire','persistent','sculpture']){
   result[mode]={};for(const [key,[lo,hi]] of Object.entries(MODE_TUNING)){
    const n=value?.[mode]?.[key];result[mode][key]=Number.isFinite(n)?Math.max(lo,Math.min(hi,n)):1;
   }
  }
+ result.smoke.openBoundaries=value?.smoke?.openBoundaries===true;
  return result;
 }

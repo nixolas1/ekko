@@ -68,6 +68,9 @@ export class HandForces {
       const landmarks=s.motion.sample(time),palm=s.mapPoint(landmarks[9]);
       s.renderX=palm[0];s.renderY=palm[1];s.renderAt=time;
       const pointAnchor=s.mapPoint(landmarks[8]),thumb=s.mapPoint(landmarks[4]);
+      const aimBase=s.mapPoint(landmarks[s.stable==='point'?5:0]);
+      const aimTip=s.stable==='point'?pointAnchor:palm;
+      const emitDirection=[aimTip[0]-aimBase[0],aimTip[1]-aimBase[1]];
       const tips=s.vortexTips;
       const va=s.mapPoint(landmarks[tips[0]]),vb=s.mapPoint(landmarks[tips[1]]);
       const fade=clamp(remaining/125,0,1);
@@ -79,7 +82,7 @@ export class HandForces {
       const palmActive=s.stable==='fist'||s.stable==='open'||!s.stable&&['fist','open'].includes(s.candidate);
       const strength=(palmActive?s.palmStrength:0)*rest+TARGET.wand*wand+TARGET.vortex*vortex;
       result.push({...s,x:s.renderX+point*(pointAnchor[0]-palm[0])+wand*((thumb[0]+pointAnchor[0])/2-palm[0])+vortex*((va[0]+vb[0])/2-palm[0]),y:s.renderY+point*(pointAnchor[1]-palm[1])+wand*((thumb[1]+pointAnchor[1])/2-palm[1])+vortex*((va[1]+vb[1])/2-palm[1]),
-        mode:finger?Math.sign(TARGET[gesture]):s.mode,gesture,wand,vortex,point:point*fade,vortexRadius:s.vortexRadius,
+        emitDirection,mode:finger?Math.sign(TARGET[gesture]):s.mode,gesture,wand,vortex,point:point*fade,vortexRadius:s.vortexRadius,
         strength:strength*fade});
     }
     return result;

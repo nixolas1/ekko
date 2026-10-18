@@ -243,7 +243,7 @@ fn refSpawn(id: u32, mode: f32, warm: bool) -> Particle {
   let t = params.clock.x;
   let key = id ^ pcg(u32(t * 71.0) + u32(mode) * 7919u);
   let life = refLife(id, mode);
-  let gated = (mode < 5.5 || mode > 7.5) && params.simulation.y > 0.5;
+  let gated = params.simulation.y > 0.5 || params.tuning.w != 1.0;
   let warmStart = warm && !gated;
   var u = rnd(key, 41u);
   // Mode 5 favours the lit middle of the emitter, leaving dark gaps at the ends.
@@ -251,7 +251,10 @@ fn refSpawn(id: u32, mode: f32, warm: bool) -> Particle {
   // Staggered waits change the birth rate with loudness; without music the plume stays well fed.
   var age = -rnd(key, 36u) * 0.9 / (0.6 + clamp(params.sound.w, 0.0, 1.0) * 2.0);
   if (warmStart) { age = rnd(id, 37u) * life * 0.95; }
-  if (gated) { u = .12 + f32(id % 7u) / 6.0 * .74 + (rnd(key,42u)-.5)*.06; age = -0.001; }
+  if (gated) {
+    if(mode < 5.5 || mode > 7.5){u = .12 + f32(id % 7u) / 6.0 * .74 + (rnd(key,42u)-.5)*.06;}
+    age = -0.001;
+  }
   let birth = t - max(age, 0.0);
   var q = refOrigin(id, u, mode, key, birth);
   // Warm start: integrate the analytic flow over the particle's age (midpoint rule) so the first frame
@@ -290,19 +293,24 @@ fn simulateReference(id: u32, old: Particle) -> Particle {
   let invalid = !all(abs(p.position) < vec4f(8.0, 8.0, 8.0, 16.0)) || !all(abs(p.velocity) < vec4f(60.0)) || !all(abs(p.extra) < vec4f(2.0, 100.0, 60.0, 60.0));
   if (p.state.w < 0.5 || p.state.z != mode || invalid) { p = refSpawn(id, mode, true); }
   if (dt == 0.0) { return p; }
-  if ((mode < 5.5 || mode > 7.5) && params.simulation.y > 0.5 && p.extra.y < 0.0) {
+  if ((params.simulation.y > 0.5 || params.tuning.w != 1.0) && p.extra.y < 0.0) {
     // Negative age marks an inactive slot. A time-scaled event probability gates
-    // emission per audio band; mode 8 adds a baseline even when the band is quiet.
+    // emission per audio band (overall activity for the duet); lasting glow
+    // and the duet retain a baseline even when their input is quiet.
     // Early return skips analytic flow/interaction work until this slot is born,
     // while retaining a fixed-size pool instead of allocating individual particles.
-    let band=emissionLevel(id % 7u,params.emissionLow,params.emissionHigh);
+    let band=select(emissionLevel(id % 7u,params.emissionLow,params.emissionHigh),clamp(params.sound.w,0.0,1.0),mode>5.5 && mode<7.5);
     let strength=smoothstep(.06,.85,band);
-    let chance=1.0-exp(-(strength*strength*strength*3.5+select(0.0,.16,mode>7.5))*params.tuning.w*dt);
+    let response=select(1.0,emissionMultiplier(band,params.ringLevels[2].y),params.simulation.y>.5);
+    let musicRate=strength*strength*strength*3.5+select(0.0,.16,mode>7.5 || (mode>5.5 && mode<7.5));
+    let chance=1.0-exp(-select(1.8,musicRate,params.simulation.y>.5)*params.tuning.w*response*dt);
     if (rnd(id ^ pcg(u32(t*1000.0)),63u) >= chance) { return p; }
     p.extra.y=0.0;
-    let lamp=refLamps(p.extra.x,t);
-    p.position.w=round(clamp(lamp.y,0.0,1.0)*7.0)+min(lamp.x*.5,.999);
-    if(mode>7.5){p.position.w=min(strength*.65,.999);}
+    if(mode<5.5 || mode>7.5){
+      let lamp=refLamps(p.extra.x,t);
+      p.position.w=round(clamp(lamp.y,0.0,1.0)*7.0)+min(lamp.x*.5,.999);
+      if(mode>7.5){p.position.w=min(strength*.65,.999);}
+    }
   }
   p.extra.y += dt;
   if (p.extra.y < 0.0) { return p; }
@@ -357,4 +365,73 @@ fn simulateReference(id: u32, old: Particle) -> Particle {
   let outside = abs(q.x) > params.clock.z * 1.25 || abs(q.y) > 1.35 || abs(q.z) > 1.4;
   if (p.extra.y > refLife(id, mode) || outside) { return refSpawn(id, mode, false); }
   return Particle(vec4f(q, w), vec4f(v, impulse.x), vec4f(p.state.x, heat, mode, 1.0), vec4f(p.extra.x, p.extra.y, impulse.y, impulse.z));
+}
+
+// Mode 9: moving sources. Birth position, aim, band and glow are captured;
+// moving or losing a hand cannot teleport or re-light smoke already in flight.
+fn simulateHandFire(id: u32, old: Particle) -> Particle {
+  let dt=params.clock.y;
+  let t=params.clock.x;
+  var p=old;
+  if(p.state.z!=9.0 || p.state.w<0.5 || !all(abs(p.position)<vec4f(8.0))){
+    p=Particle(vec4f(0.0),vec4f(0.0),vec4f(0.0,0.0,9.0,1.0),vec4f(0.0,-1.0,0.0,1.0));
+  }
+  if(dt==0.0){return p;}
+  let life=refLife(id,9.0);
+  if(p.extra.y>life || abs(p.position.x)>params.clock.z*1.2 || abs(p.position.y)>1.3){p.extra.y=-1.0;}
+  if(p.extra.y<0.0){
+    var count=0u;
+    for(var i=0u;i<9u;i++){if(params.sourceBands[i].z>.5){count++;}}
+    if(count==0u){return p;}
+    let source=id%count;
+    let info=params.sourceBands[source];
+    let band=info.y;
+    let music=params.simulation.y>.5;
+    let response=select(1.0,emissionMultiplier(band,params.ringLevels[2].y),music);
+    let rate=select(.2,.025+pow(band,3.0)*.32,music)*params.tuning.w*response;
+    let key=id ^ pcg(u32(t*1000.0));
+    if(rnd(key,63u)>=1.0-exp(-rate*dt)){return p;}
+    let emitter=params.sources[source];
+    let aim=vec3f(emitter.zw,0.0);
+    let basis=refBasis(aim);
+    let angle=rnd(id,41u)*TAU;
+    let offset=(basis[0]*cos(angle)+basis[1]*sin(angle))*.055;
+    // Warm-to-icy hue follows this source's band; brightness belongs to this note.
+    let glow=select(.32,band,music);
+    p=Particle(vec4f(vec3f(emitter.xy,0.0)+offset,glow),vec4f(aim*.55,params.burst.z),vec4f(emitter.xy,9.0,1.0),vec4f(info.x,0.0,emitter.zw));
+  }
+  p.extra.y+=dt;
+  let age=p.extra.y;
+  let aim=vec3f(p.extra.zw,0.0);
+  let q=p.position.xyz;
+  let carried=q-aim*t*.12;
+  let curls=refWaves(carried,t*.35,4.5,6u,31.0).curl*.27+refWaves(carried,t*.6,11.0,4u,41.0).curl*.07;
+  let bundle=RefBundle(vec3f(p.state.xy,0.0)+aim*.32,normalize(aim+vec3f(0.0,0.0,.6)),vec2f(.18,.2));
+  let rolling=refRing(q,bundle,.25,select(1.6,-1.6,p.extra.x>.5));
+  let desired=(aim*.18+rolling)*(1.0+p.position.w*.4)+curls*smoothstep(0.0,.9,age)*params.tuning.y+vec3f(0.0,.012*age,0.0);
+  var v=mix(p.velocity.xyz,desired,1.0-exp(-dt*4.0));
+  for(var j=0u;j<min(u32(params.display.w),32u);j++){
+    let f=params.forces[j];
+    if(f.w<0.0){continue;}
+    let delta=f.xy-q.xy;
+    let dist=length(delta);
+    let n=delta/max(dist,.001);
+    let influence=exp(-dot(delta,delta)/max(f.w*f.w,.001));
+    var wanted=n*clamp((dist-.1)*4.0,-.8,1.4)+vec2f(-n.y,n.x)*1.2+params.forceVel[j].xy*.65;
+    if(f.z<0.0){wanted=-n*2.0+params.forceVel[j].xy*.5;}
+    wanted=gestureFlow(wanted,delta,f.w,params.forceVel[j].xy,params.forceVel[j].zw);
+    v=vec3f(mix(v.xy,wanted,1.0-exp(-min(abs(f.z),24.0)*influence*dt*.8)),v.z);
+  }
+  var serial=p.velocity.w;
+  for(var j=0u;j<min(u32(params.extra.x),8u);j++){
+    let b=params.bursts[j];
+    if(b.z>serial){
+      let delta=q.xy-b.xy;
+      v+=vec3f(delta/max(length(delta),.02)*exp(-dot(delta,delta)/.35)*b.w*1.7,0.0);
+      serial=b.z;
+    }
+  }
+  p.position=vec4f(q+v*dt,p.position.w);
+  p.velocity=vec4f(v,serial);
+  return p;
 }

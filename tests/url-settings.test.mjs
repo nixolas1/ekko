@@ -28,7 +28,7 @@ test('old force links migrate to one force; pause URLs cannot freeze a fresh ses
 test('per-mode tuning survives links without changing other modes',()=>{
  const saved=normalizeSettings({modeSettings:{smoke:{speed:.5}}});
  const parsed=settingsFromURL('https://example.test/?mode=fluid-ring&speed=1.8&glow=2&turbulence=.3&emission=1.5',saved);
- assert.deepEqual(parsed.modeSettings['fluid-ring'],{speed:1.8,glow:2,turbulence:.3,emission:1.5,visibility:1});
+ assert.deepEqual(parsed.modeSettings['fluid-ring'],{speed:1.8,glow:2,turbulence:.3,emission:1.5,spectrumEmission:1,visibility:1});
  assert.equal(parsed.modeSettings.smoke.speed,.5);
  const again=settingsFromURL(settingsURL('https://example.test/',parsed),saved);
  assert.deepEqual(again.modeSettings['fluid-ring'],parsed.modeSettings['fluid-ring']);
@@ -49,4 +49,28 @@ test('hand overlay is opt-in, saved in links, and keeps music paused',()=>{
  assert.equal(settingsFromURL(settingsURL('https://example.test/',on)).showHands,true);
  assert.equal(settingsFromURL('https://example.test/?showHands=0',on).showHands,false);
  assert.equal(settingsFromURL('https://example.test/?showHands=invalid',on).showHands,true);
+});
+
+
+test('smoke open boundaries default off, persist, and round-trip in links',()=>{
+ assert.equal(normalizeSettings().modeSettings.smoke.openBoundaries,false);
+ assert.equal(normalizeSettings({modeSettings:{smoke:{openBoundaries:'true'}}}).modeSettings.smoke.openBoundaries,false);
+ const on=settingsFromURL('https://example.test/?mode=smoke&openBoundaries=1');
+ assert.equal(on.modeSettings.smoke.openBoundaries,true);
+ assert.equal(settingsFromURL(settingsURL('https://example.test',on)).modeSettings.smoke.openBoundaries,true);
+ assert.equal(settingsFromURL('https://example.test/?openBoundaries=0',on).modeSettings.smoke.openBoundaries,false);
+ assert.equal(settingsFromURL('https://example.test/?openBoundaries=invalid',on).modeSettings.smoke.openBoundaries,true);
+ const ring=settingsFromURL('https://example.test/?mode=fluid-ring&openBoundaries=0',on);
+ assert.equal(ring.modeSettings.smoke.openBoundaries,true);
+ assert.equal(new URL(settingsURL('https://example.test/?openBoundaries=1',ring)).searchParams.has('openBoundaries'),false);
+});
+
+
+test('spectrum emission is per-mode, bounded, and preserved in share links',()=>{
+ const saved=normalizeSettings({physicsMode:'spectral',modeSettings:{spectral:{spectrumEmission:1.8},smoke:{spectrumEmission:0}}});
+ const parsed=settingsFromURL(settingsURL('https://example.test',saved),saved);
+ assert.equal(parsed.modeSettings.spectral.spectrumEmission,1.8);assert.equal(parsed.modeSettings.smoke.spectrumEmission,0);
+ assert.equal(settingsFromURL('https://example.test/?spectrumEmission=0',saved).modeSettings.spectral.spectrumEmission,0);
+ assert.equal(settingsFromURL('https://example.test/?spectrumEmission=3',saved).modeSettings.spectral.spectrumEmission,1.8);
+ assert.equal(normalizeSettings({modeSettings:{smoke:{spectrumEmission:99}}}).modeSettings.smoke.spectrumEmission,2);
 });
