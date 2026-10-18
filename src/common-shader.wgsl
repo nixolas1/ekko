@@ -14,7 +14,7 @@ struct Parameters {
   style: vec4f,   // effect, fill, brightness gain, frame scale
   extra: vec4f,   // bursts drained this frame, trail decay, exposure, bloom strength
   bursts: array<vec4f, 8>,  // x, y, serial, strength
-  forceVel: array<vec4f, 32>, // smoothed force point velocity x, y
+  forceVel: array<vec4f, 32>, // smoothed velocity xy, Wand/Vortex blend weights zw
   simulation: vec4f, // mode: 0 sculpture, 1 persistent, 2 smoke, 3 ring, 4 volume, 5 plume, 6 duet; audible input active, onset envelope, reserved
   emissionLow: vec4f, // seven measured bands: bass to treble
   emissionHigh: vec4f,
@@ -71,4 +71,15 @@ fn mouseVelocity(q:vec2f,v:vec2f,mouse:vec4f,dt:f32)->vec2f {
   let n=select(vec2f(1,0),delta/max(distance,.00001),distance>.00001);
   let falloff=pow(1.0-distance/radius,2.0);
   return v+n*max(0.0,2.4*falloff-dot(v,n))*(1.0-exp(-dt*35.0));
+}
+
+// Continuous gesture blending, shared by all particle and fluid modes. A wand
+// gathers a tiny core; a vortex preserves an orbit instead of collapsing it.
+fn gestureFlow(base:vec2f,delta:vec2f,radius:f32,motion:vec2f,weights:vec2f)->vec2f {
+  if(weights.x+weights.y<.0001){return base;}
+  let d=length(delta);let n=delta/max(d,.001);let tangent=vec2f(-n.y,n.x);
+  let wand=n*clamp((d-.018)*10.0,-.25,2.4)+tangent*.08+motion*.85;
+  let orbit=max(radius*.42,.06);
+  let vortex=n*clamp((d-orbit)*5.0,-1.2,1.2)+tangent*2.6*smoothstep(0.0,orbit*.35,d)+motion*.65;
+  return base*max(0.0,1.0-weights.x-weights.y)+wand*weights.x+vortex*weights.y;
 }

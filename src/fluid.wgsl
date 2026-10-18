@@ -137,7 +137,8 @@ fn nozzleVelocity(q:vec2f) -> vec2f {
     // Circulation and hand motion survive incompressibility projection; a purely
     // radial force is a pressure gradient and would be removed by the solver.
     let sign=select(-1.0,1.0,hand.z>0.0);
-    let desired=(n*.7+vec2f(-n.y,n.x)*1.15)*sign+params.forceVel[j].xy*.8;
+    let base=(n*.7+vec2f(-n.y,n.x)*1.15)*sign+params.forceVel[j].xy*.8;
+    let desired=gestureFlow(base,delta,radius,params.forceVel[j].xy,params.forceVel[j].zw);
     v += desired * w * min(abs(hand.z),24.0) * params.clock.y * .65;
   }
   for(var j=0u;j<min(u32(params.extra.x),8u);j++) {
@@ -195,6 +196,22 @@ fn nozzleVelocity(q:vec2f) -> vec2f {
   if(!ringMode() && (id.x==0u || id.x==size.x-1u)){v.x=0.0;}
   if(!ringMode() && id.y==0u){v.y=0.0;}
   let q=worldAt((vec2f(id.xy)+.5)/vec2f(size));
+  // Magical suction/push must survive the pressure solve, which otherwise
+  // cancels radial forces. Apply bounded local drift just like the mouse obstacle.
+  for(var j=0u;j<min(u32(params.display.w),32u);j++){
+    let hand=params.forces[j];let delta=hand.xy-q;let d=length(delta);
+    let radius=max(hand.w,.05);let n=delta/max(d,.001);
+    let wand=params.forceVel[j].z;
+    let push=select(0.0,1.0,hand.z<0.0)*(1.0-wand-params.forceVel[j].w);
+    let influence=exp(-d*d/(radius*radius));
+    let rate=(1.0-exp(-params.clock.y*min(abs(hand.z),24.0)*1.1))*influence;
+    v=mix(v,n*clamp((d-.018)*10.0,-.25,2.4)+params.forceVel[j].xy*.85,rate*wand);
+    v=mix(v,-n*2.0+params.forceVel[j].xy*.5,rate*push);
+  }
+  for(var j=0u;j<min(u32(params.extra.x),8u);j++){
+    let b=params.bursts[j];let delta=q-b.xy;let r=length(delta);
+    v+=delta/max(r,.02)*exp(-r*r/.18)*b.w*1.2;
+  }
   v=mouseVelocity(q,v,params.mouse,params.clock.y);
   textureStore(result,c,vec4f(clamp(v,vec2f(-3),vec2f(3)),0,0));
 }

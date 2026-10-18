@@ -168,19 +168,23 @@ export class ParticleEngine {
     if (this.pending.length>MAX_QUEUE) this.pending.shift();
     this.burst=[x,y,this.serial,power];
   }
-  // Greedy nearest match to last frame's points gives each one a smoothed velocity; the order of forces is not stable identity.
+  // Hand IDs keep motion independent when hands cross or detections reorder.
+  // Synthetic forces without IDs retain nearest-position matching.
   trackForces(list,dt) {
     const previous=this.tracked,used=new Set(),next=[];
     for (const f of list) {
       let best=null,bestD=.35*.35;
-      for (const p of previous) { if(used.has(p))continue; const d=(f[0]-p.x)**2+(f[1]-p.y)**2; if(d<bestD){bestD=d;best=p;} }
+      const id=Number.isFinite(f[6])?f[6]:null;
+      for (const p of previous) { if(used.has(p))continue; const d=(f[0]-p.x)**2+(f[1]-p.y)**2; if(id!==null?p.id===id:d<bestD){bestD=d;best=p;if(id!==null)break;} }
       const entry=best||{vx:0,vy:0,moved:this.clock};
       if (best) {
         used.add(best);
         if (bestD>1e-8) { const span=Math.max(this.clock-entry.moved,1/120); entry.vx+=(clamp((f[0]-entry.x)/span,-4,4)-entry.vx)*.5; entry.vy+=(clamp((f[1]-entry.y)/span,-4,4)-entry.vy)*.5; entry.moved=this.clock; }
         else { const keep=Math.exp(-dt*2.5); entry.vx*=keep; entry.vy*=keep; }
       }
-      entry.x=f[0]; entry.y=f[1]; next.push(entry);
+      // Filtered palm motion excludes the anchor shift when finger powers change.
+      if(Number.isFinite(f[7])&&Number.isFinite(f[8])){entry.vx=clamp(f[7],-4,4);entry.vy=clamp(f[8],-4,4);}
+      entry.x=f[0]; entry.y=f[1];entry.id=id;next.push(entry);
     }
     this.tracked=next; return next;
   }
@@ -217,6 +221,7 @@ export class ParticleEngine {
     d.set([0,1,2,3].map(i=>clamp(Number(audio?.[i])||0,0,1.5)),4);
     d.set([Number(this.palette)||0,this.sceneSize[0],this.sceneSize[1],list.length,...this.burst.slice(0,2),this.served,before],8);
     list.forEach((f,i)=>d.set([f[0],f[1],f[2],f[3]],16+i*4));
+    list.forEach((f,i)=>{const w=clamp(Number(f[4])||0,0,1),v=clamp(Number(f[5])||0,0,1),sum=Math.max(1,w+v);d.set([w/sum,v/sum],186+i*4);});
     if (!paused) velocities.slice(0,list.length).forEach((v,i)=>d.set([v.vx,v.vy],184+i*4));
     // A brightness floor keeps dispersed particles legible at high counts. This
     // setting changes direct particle light, independently of the bloom control.

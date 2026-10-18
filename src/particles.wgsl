@@ -291,6 +291,7 @@ fn simulateSmoke(id: u32, old: Particle) -> Particle {
     let strength = min(abs(f.z), 24.0);
     var wantedFlow = n * clamp((dist - 0.1) * 4.0, -0.8, 1.4) + vec2f(-n.y, n.x) * 1.2 + params.forceVel[j].xy * 0.65;
     if (f.z < 0.0) { wantedFlow = -n * 2.0 + params.forceVel[j].xy * 0.5; }
+    wantedFlow=gestureFlow(wantedFlow,delta,f.w,params.forceVel[j].xy,params.forceVel[j].zw);
     let weight = 1.0 - exp(-strength * influence * dt * 0.8);
     v = vec3f(mix(v.xy, wantedFlow, weight), v.z);
     heat = max(heat, influence * strength / 24.0);
@@ -414,7 +415,7 @@ fn simulate(@builtin(global_invocation_id) gid: vec3u) {
         let bias = hv / max(hs, 0.001) * min(hs, 2.0) * 0.8;
         let dirE = normalize(vec2f(cos(a), sin(a)) + bias + vec2f(0.0001, 0.0));
         let jet = (0.5 + 1.6 * r1) * (0.6 + 0.4 * min(abs(f.z) / 16.0, 1.0));
-        let emitRadius = select(0.025, 0.10, f.z >= 10.0);
+        let emitRadius = mix(select(0.025, 0.10, f.z >= 10.0),0.012,params.forceVel[j].z);
         q = vec3f(f.xy + vec2f(cos(a), sin(a)) * emitRadius, (rnd(key, 21u) - 0.5) * 0.1);
         v = vec3f(dirE * jet + hv * 0.7, (r1 - 0.5) * 0.3);
         ex = 0.8;
@@ -448,13 +449,20 @@ fn simulate(@builtin(global_invocation_id) gid: vec3u) {
     let dd = sqrt(dd2);
     let s = clamp(abs(f.z), 0.0, 24.0);
     let range2 = max(f.w * f.w, 0.0009);
-    let infl = select(exp(-(dd2 + 0.02) / range2), 1.0 / (1.0 + dd2 / (range2 * 0.45)), persistent);
+    let ordinaryInfluence=select(exp(-(dd2 + 0.02) / range2),1.0/(1.0+dd2/(range2*.45)),persistent);
+    let infl=mix(ordinaryInfluence,exp(-dd2/range2),params.forceVel[j].z+params.forceVel[j].w);
     let n = d / max(dd, 0.001);
     let spin = min(0.7 + 0.09 * s, 2.0) * smoothstep(0.0, 0.18, dd);
     let ring = select(0.0, 0.1, f.z >= 10.0);
     var wanted = n * clamp((dd - ring) * 5.0, -1.0, 1.8) + vec2f(-n.y, n.x) * spin + params.forceVel[j].xy * 0.8;
     // An open hand pushes radially outward for as long as it stays open.
-    if (f.z < 0.0) { wanted = -n * (1.8 + s * 0.09) + params.forceVel[j].xy * 0.4; }
+    if (f.z < 0.0) {
+      // Strong at the palm, falling to rest at the edge instead of sweeping
+      // persistent particles into a bright rectangle at the screen boundaries.
+      let falloff=pow(max(0.0,1.0-dd/max(f.w,.05)),2.0);
+      wanted = -n * (1.8 + s * 0.09) * falloff + params.forceVel[j].xy * 0.4 * falloff;
+    }
+    wanted=gestureFlow(wanted,d,f.w,params.forceVel[j].xy,params.forceVel[j].zw);
     let relax = 1.0 - exp(-(1.5 + 0.9 * s) * infl * dt);
     v = vec3f(v.xy + (wanted - v.xy) * relax, v.z);
     if (persistent) { v.z += (-q.z * 1.8 - v.z) * relax; }

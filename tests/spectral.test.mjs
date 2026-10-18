@@ -187,3 +187,14 @@ test('particle visibility survives high counts and changes only Airbender and Li
   engine.modeSettings={visibility:4};engine.frame(1/60,[0,0,0,0],[],false);assert.equal(log.uniforms.at(-1)[146],smoke);
  });
 });
+
+test('hand powers keep identity across reordered hands and exclude anchor changes from velocity',async()=>{
+ await withEngine((engine,log)=>{
+  engine.frame(1/60,[0,0,0,0],[[-.1,0,14,.22,1,0,7,0,0],[.1,0,16,.5,0,1,9,.2,-.1]],false);
+  engine.frame(1/60,[0,0,0,0],[[-.15,.1,16,.5,0,1,9,.2,-.1],[.15,-.2,14,.22,1,0,7,0,0]],false);
+  assert.deepEqual(engine.tracked.map(x=>x.id),[9,7]);
+  const u=log.uniforms.at(-1);
+  assert(Math.abs(u[184]-.2)<1e-6);assert(Math.abs(u[185]+.1)<1e-6);
+  assert.deepEqual(Array.from(u.slice(186,192)),[0,1,0,0,1,0]);
+ });
+});

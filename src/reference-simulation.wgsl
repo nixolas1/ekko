@@ -284,6 +284,7 @@ fn simulateReference(id: u32, old: Particle) -> Particle {
     let strength = min(abs(f.z), 24.0);
     var wantedFlow = n * clamp((dist - 0.1) * 4.0, -0.8, 1.4) + vec2f(-n.y, n.x) * 1.2 + params.forceVel[j].xy * 0.65;
     if (f.z < 0.0) { wantedFlow = -n * 2.0 + params.forceVel[j].xy * 0.5; }
+    wantedFlow=gestureFlow(wantedFlow,delta,f.w,params.forceVel[j].xy,params.forceVel[j].zw);
     let weight = 1.0 - exp(-strength * influence * dt * 0.8);
     v = vec3f(mix(v.xy, wantedFlow, weight), v.z);
     heat = max(heat, influence * strength / 24.0);

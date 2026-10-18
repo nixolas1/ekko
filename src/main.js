@@ -36,10 +36,12 @@ function persist(){
 const handMarkers=Array.from({length:8},()=>{const node=document.createElement('div');node.className='hand-marker';node.hidden=true;node.innerHTML='<span></span>';$('hand-indicators').append(node);return node;});
 const bars=Array.from({length:4},()=>{const bar=document.createElement('i');$('spectrum').append(bar);return bar;});
 function mapPoint(p){const aspect=innerWidth/innerHeight,cameraAspect=($('camera').videoWidth||640)/($('camera').videoHeight||480);return [(1-2*p.x)*Math.min(aspect,cameraAspect),(1-2*p.y)*Math.min(1,aspect/cameraAspect)];}
+const gestureLabels={wand:'Wand',vortex:'Vortex',shockwave:'Shockwave',pull:'Gather',push:'Push'};
 const tracker=new Tracking($('camera'),data=>{
   trackingData=data;trackingTime=performance.now();handForces.update(data,trackingTime,mapPoint);
   $('camera-count').textContent=`${data.hands.length} hands`;
   for(const point of data.bursts){const [x,y]=mapPoint(point);engine.explode(x,y);}
+  for(const point of handForces.drainBursts())engine.explode(point.x,point.y,point.strength*pushPower);
   drawSkeleton(data);
 },status=>{ $('tracking-status').textContent=status;if(status.startsWith('Tracking stopped')){resetCamera();notice(status);} },{maxHands:settings.maxHands});
 function drawSkeleton(data){
@@ -50,7 +52,12 @@ function drawSkeleton(data){
   const xy=p=>[ox+(1-p.x)*w,oy+p.y*h];
   const edges=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
   ctx.strokeStyle='#87f1e6';ctx.lineWidth=2;
-  for(const hand of data.hands){ctx.beginPath();for(const [a,b] of edges){ctx.moveTo(...xy(hand[a]));ctx.lineTo(...xy(hand[b]));}ctx.stroke();}
+  data.hands.forEach((hand,index)=>{
+    ctx.beginPath();for(const [a,b] of edges){ctx.moveTo(...xy(hand[a]));ctx.lineTo(...xy(hand[b]));}ctx.stroke();
+    const state=handForces.states.get(data.handIds?.[index]??index),[x,y]=xy(hand[0]);
+    ctx.font='18px sans-serif';ctx.textAlign='center';ctx.fillStyle='#e8f9ff';
+    ctx.fillText(gestureLabels[state?.stable]||(state?(state.mode>0?'Gather':'Push'):'Tracking'),Math.max(45,Math.min(canvas.width-45,x)),Math.max(20,Math.min(canvas.height-8,y+25)));
+  });
 }
 function resetCamera(){trackingData=null;handForces.clear();$('camera-button').innerHTML='Enable camera';$('camera-placeholder').hidden=false;$('camera-count').textContent=`Up to ${tracker.options.maxHands} hands`;$('tracking-hz').textContent='—';$('skeleton').getContext('2d').clearRect(0,0,$('skeleton').width,$('skeleton').height);}
 async function toggleCamera(){
@@ -291,7 +298,11 @@ function frame(now){
   engine.musicActive=sound.mode==='mic'||sound.mode==='tab'||(sound.mode==='file'&&!!sound.element&&!sound.element.paused);
   const audio=sound.sample(now/1000);engine.audioResponse=sound.gain;engine.musicTransient=sound.transient;engine.emissionBands=sound.emissionBands;engine.ringBands=sound.ringSpectrum.levels;engine.ringAttacks=sound.ringSpectrum.attacks;audio[3]=Math.max(audio[3],sound.transient*.8);
   // Hand pull/push is separate from the mouse obstacle; body joints never attract.
-  const forces=hands.map(hand=>[hand.x,hand.y,hand.strength*(hand.strength<0?pushPower:pullPower),engine.persistent?.95:.65]);
+  const forces=hands.map(hand=>{
+    const wand=hand.wand||0,vortex=hand.vortex||0,shock=hand.shockwave||0;
+    const radius=(engine.persistent?.95:.65)*Math.max(0,1-wand-vortex-shock)+.22*wand+(hand.vortexRadius||.35)*vortex+shock;
+    return [hand.x,hand.y,hand.strength*(hand.strength<0?pushPower:pullPower),radius,wand,vortex,hand.id,hand.vx,hand.vy];
+  });
   if(autoCount&&!paused&&!['smoke','fluid-ring'].includes(physicsMode)){const quality=adaptiveQuality.update(dt,engine.count,engine.renderScale,tracker.active&&tracker.backend==='GPU'?tracker.ms:0);if(quality){engine.count=quality.count;engine.renderScale=engine.resolution==='auto'?quality.scale:1;countUI();}}
   engine.frame(dt,audio,forces,paused);frames.push(dt*1000);if(frames.length>90)frames.shift();
   if(now-lastUI>150){

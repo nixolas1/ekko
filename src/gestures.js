@@ -1,17 +1,43 @@
 // Pure tracking logic (no DOM, no MediaPipe): landmark sanity filters, hand
-// openness, and a closed-to-open burst detector. Shared by the main thread
+// openness, finger counting, and a closed-to-open burst detector. Shared by the main thread
 // (GestureTracker) and the worker bundle (cleanHands/cleanPoses), and unit tested in Node.
 //
 // Landmark x/y are normalized to the full camera frame, so on a non-square frame
 // they are anisotropic. Every distance below multiplies x (and z, which MediaPipe
 // scales like x) by `aspect = width/height` to measure in isotropic units.
 
-const finite = p => p && Number.isFinite(p.x) && Number.isFinite(p.y);
+const finite = p => p && Number.isFinite(p.x) && Number.isFinite(p.y) && (p.z === undefined || Number.isFinite(p.z));
+export const validHand = points => Array.isArray(points) && points.length >= 21 && points.slice(0, 21).every(finite);
 
-export function openness(points, aspect = 1) {
+// Tips of the long fingers: index, middle, ring, pinky. The thumb is deliberately
+// ignored; its extension reads unreliably from a webcam.
+export const FINGER_TIPS = [8, 12, 16, 20];
+const FINGER_GESTURES = ['fist', 'wand', 'vortex', 'shockwave', 'open'];
+
+// Extended state of [index, middle, ring, pinky], or null for incomplete/non-finite
+// landmarks. A finger is extended when its tip is clearly farther from the wrist than
+// its PIP joint and well away from it. Only wrist distances are compared, so the result
+// does not depend on hand rotation or mirroring.
+export function extendedFingers(points, aspect = 1) {
+  if (!validHand(points)) return null;
   const dist = (a, b) => Math.hypot((a.x - b.x) * aspect, a.y - b.y, ((a.z || 0) - (b.z || 0)) * aspect);
   const palm = Math.max(dist(points[0], points[9]), .001);
-  return [8, 12, 16, 20].filter(i => dist(points[i], points[0]) > dist(points[i - 2], points[0]) * 1.28 && dist(points[i], points[i - 2]) > palm * .32).length / 4;
+  return FINGER_TIPS.map(i => dist(points[i], points[0]) > dist(points[i - 2], points[0]) * 1.28 && dist(points[i], points[i - 2]) > palm * .32);
+}
+
+export function openness(points, aspect = 1) {
+  const fingers = extendedFingers(points, aspect);
+  return fingers ? fingers.filter(Boolean).length / 4 : 0;
+}
+
+// Raw (undebounced) per-frame classification by the number of extended long fingers:
+// 0 fist, 1 wand, 2 vortex, 3 shockwave, 4 open. `tips` are the landmark indices of the
+// extended fingers. Null for unusable landmarks.
+export function fingerGesture(points, aspect = 1) {
+  const fingers = extendedFingers(points, aspect);
+  if (!fingers) return null;
+  const tips = FINGER_TIPS.filter((_, k) => fingers[k]);
+  return { count: tips.length, tips, gesture: FINGER_GESTURES[tips.length] };
 }
 
 // Drops malformed or implausible hands, strips them to plain {x,y,z} (MediaPipe's hand
@@ -60,8 +86,12 @@ export function nextPoseStride(stride, averageMs, slowMs = 65, fastMs = 40) {
 // between frames (globally nearest pairs first), expire lost tracks, and require a
 // closed-to-open transition. Identity is positional only: it does not survive long
 // loss or two hands crossing at the same spot.
+// The palm burst needs all four long fingers: three raised fingers are the shockwave
+// gesture (HandForces). Holding one to three fingers steadily also cancels a fist's
+// arming, so fist -> three fingers -> open palm does not fire twice.
 const DEFAULTS = {
-  closedMax: .25, openMin: .75, closedFrames: 2, openFrames: 2,
+  closedMax: .25, openMin: 1, closedFrames: 2, openFrames: 2,
+  partialHold: 180,     // ms of a steady one-to-three-finger count that disarms a fist
   cooldown: 500,        // ms between bursts of one track
   expire: 600,          // ms a track survives without a matching detection
   gapReset: 250,        // ms of loss after which the consecutive-frame counters restart
@@ -102,16 +132,21 @@ export class GestureTracker {
       const wrist = points[0];
       let track = assigned[hi];
       if (!track) {
-        track = { id: this.nextId++, x: wrist.x, y: wrist.y, seen: time, closed: 0, open: 0, armed: false, closedAt: -Infinity, last: -Infinity };
+        track = { id: this.nextId++, x: wrist.x, y: wrist.y, seen: time, closed: 0, open: 0, armed: false, closedAt: -Infinity, last: -Infinity, partial: 0, partialSince: null };
         this.tracks.push(track);
-      } else if (time - track.seen > o.gapReset) { track.closed = 0; track.open = 0; }
+      } else if (time - track.seen > o.gapReset) { track.closed = 0; track.open = 0; track.partialSince = null; }
       track.x = wrist.x; track.y = wrist.y; track.seen = time;
 
-      const level = openness(points, aspect);
-      track.closed = level <= o.closedMax ? track.closed + 1 : 0;
-      track.open = level >= o.openMin ? track.open + 1 : 0;
+      // Unusable landmarks keep the identity but count as neither closed nor open.
+      const fingers = extendedFingers(points, aspect), count = fingers ? fingers.filter(Boolean).length : NaN;
+      track.closed = count / 4 <= o.closedMax ? track.closed + 1 : 0;
+      track.open = count / 4 >= o.openMin ? track.open + 1 : 0;
+      const partial = count > 0 && count < 4;
+      if (!partial || count !== track.partial || track.partialSince === null) track.partialSince = partial ? time : null;
+      track.partial = count;
       if (track.closed >= o.closedFrames) { track.armed = true; track.closedAt = time; }
       if (track.armed && time - track.closedAt > o.armTimeout) track.armed = false;
+      if (track.armed && partial && time - track.partialSince >= o.partialHold) track.armed = false;
       if (track.armed && track.open >= o.openFrames) {
         track.armed = false; // consumed, even when suppressed: the user must close the hand again
         const p = points[9];
