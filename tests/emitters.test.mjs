@@ -3,13 +3,24 @@ import assert from 'node:assert/strict';
 import {Emitters} from '../src/emitters.js';
 import {settingsFromURL,settingsURL} from '../src/url-settings.js';
 const hand=(id,x=0,y=0,aim=[1,0])=>({id,x,y,gesture:'point',emitDirection:aim});
+test('gesture-relative depth controls each source independently; mouse power stays neutral',()=>{
+ const e=new Emitters();
+ const near={...hand(2),pointDepthScale:4},far={...hand(4),pointDepthScale:.25};
+ for(const hands of [[near,far],[far,near]]){
+  const sources=e.sample(hands,{active:true,x:0,y:0},100);
+  assert.deepEqual(sources.map(s=>[s.id,s.power]),[[2,4],[4,.25],[-1,1]]);
+ }
+ for(const [value,wanted] of [[undefined,1],[NaN,1],[Infinity,1],[-5,.25],[10,4]]){
+  assert.equal(e.sample([{...hand(2),pointDepthScale:value}],null,200)[0].power,wanted);
+ }
+});
 test('sources span bass through treble, keeping identities when hands cross',()=>{
  const e=new Emitters();
  assert.deepEqual(e.sample([hand(2)],null,0).map(s=>s.band),[0]);
  const two=e.sample([hand(4),hand(2)],null,20);
- assert.deepEqual(two.map(s=>[s.id,s.band]),[[2,0],[4,1]]);
- assert.deepEqual(e.sample([hand(4,-1),hand(2,1)],null,40).map(s=>[s.id,s.band]),[[2,0],[4,1]]);
- assert.deepEqual(e.sample([hand(4),hand(2)],{active:true,x:0,y:0},60).map(s=>s.band),[0,.5,1]);
+ assert.deepEqual(two.map(s=>[s.id,s.band]),[[2,0],[4,.5]]);
+ assert.deepEqual(e.sample([hand(4,-1),hand(2,1)],null,40).map(s=>[s.id,s.band]),[[2,0],[4,.5]]);
+ assert.deepEqual(e.sample([hand(4),hand(2)],{active:true,x:0,y:0},60).map(s=>[s.id,s.band]),[[2,0],[4,.5],[-1,1]]);
  assert.deepEqual(e.sample(Array.from({length:8},(_,i)=>hand(i)),{active:true,x:0,y:0},80).map(s=>s.band),[0,.125,.25,.375,.5,.625,.75,.875,1]);
  assert.equal(e.sample([],null,100).length,0);assert.equal(e.states.size,0);
 });

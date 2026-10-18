@@ -253,7 +253,8 @@ export class ParticleEngine {
     // A brightness floor keeps dispersed particles legible at high counts. This
     // setting changes direct particle light, independently of the bloom control.
     const particleVisibility=mode<1.5?clamp(Number(tuning.visibility)||1,.25,4):1;
-    const densityGain=mode<1.5?Math.max(.38,Math.pow(131072/count,.55)):Math.pow(131072/count,.55);
+    // Bright hand-fire cores need stronger normalization to retain colour at millions of particles.
+    const densityGain=mode<1.5?Math.max(.38,Math.pow(131072/count,.55)):Math.pow(131072/count,mode===9?.85:.55);
     d.set([effect,fill,densityGain*particleVisibility,clamp(real*60,.3,2.5)],144);
     d.set([drained.length,fresh?0:Math.exp(-real/Math.max(.02,Number(this.trail)||.14)),Math.max(0,Number(this.exposure)||0),Math.max(0,Number(this.bloom)||0)],148);
     d.set([mode,this.musicActive?1:0,clamp(Number(this.musicTransient)||0,0,1),clamp(Number(this.audioResponse)||1.2,.3,3)],312);
@@ -270,7 +271,7 @@ export class ParticleEngine {
       const band=clamp(Number(source.band)||0,0,1),at=band*8,lo=Math.floor(at),hi=Math.min(8,lo+1);
       const level=(Number(ring[lo])||0)*(1-at+lo)+(Number(ring[hi])||0)*(at-lo);
       d.set([source.x,source.y,...source.direction],356+i*4);
-      d.set([band,clamp(level,0,1),1,0],392+i*4);
+      d.set([band,clamp(level,0,1),1,clamp(Number.isFinite(source.power)?source.power:1,.25,4)],392+i*4);
     });
     drained.forEach((b,i)=>d.set([b.x,b.y,b.serial,b.strength],152+i*4));
     device.queue.writeBuffer(this.uniform,0,d);

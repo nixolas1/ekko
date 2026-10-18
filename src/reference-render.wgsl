@@ -75,10 +75,18 @@ fn spectralLight(xy: vec2f, response: f32) -> vec4f {
   let heat = select(clamp(p.state.y, 0.0, 1.5),0.0,mode>8.5);
   let seed = rnd(id, 6u);
   let pixel = 2.0 / max(params.display.z, 1.0);
-  let sigmaPx = mix(0.45, 0.65, seed);
+  let handFire=mode>8.5;
+  let kind=rnd(id,75u);
+  let smoke=handFire && kind<.25;
+  let spark=handFire && kind>.94;
+  var sigmaPx = mix(0.45, 0.65, seed);
+  if(handFire){sigmaPx=select(.65,1.0,spark);}
+  if(smoke){sigmaPx=mix(1.5,6.0,smoothstep(0.0,1.8,age))*(params.display.z/1080.0);}
   let sigma = sigmaPx * pixel;
   // Short streaks: a few pixels at most, longer when a hand or burst has heated the particle.
-  let trail = min(speed * (0.014 + 0.01 * heat), 6.0 * pixel * (1.0 + heat * 2.0));
+  var trail = min(speed * (0.014 + 0.01 * heat), 6.0 * pixel * (1.0 + heat * 2.0));
+  if(handFire){trail=min(speed*select(.022,.055,spark),select(18.0,42.0,spark)*pixel);}
+  if(smoke){trail*=.25;}
   let halfLen = trail * 0.5;
   let extent = 2.6 * sigma;
   let center = head - dir * halfLen;
@@ -94,22 +102,26 @@ fn spectralLight(xy: vec2f, response: f32) -> vec4f {
   // This uses the ideal untruncated profile; the quad cuts off its faint tails.
   let area = sigmaPx * sigmaPx * (6.2831853 + 5.013 * o.halfLength);
   let density = select(params.style.z,1.0,mode>6.5 && mode<7.5) * params.style.w * (params.display.z / 1080.0);
-  let fade = smoothstep(0.0, 0.35, age) * (1.0 - smoothstep(life * 0.65, life, age));
+  let fade = smoothstep(0.0, select(.35,.045,handFire), age) * (1.0 - smoothstep(life * 0.65, life, age));
   let depth = clamp(0.8 + p.position.z * 0.6, 0.45, 1.2);
   let vary = 0.35 + 1.3 * seed * seed;
   let u = p.extra.x;
   let music = params.simulation.y > 0.5;
   var color = vec3f(0.0);
   if (mode > 8.5) {
-    let ember=p.position.w*(1.0-smoothstep(life*.2,life*.9,age));
-    let warm=ramp3(vec3f(1.0,.85,.45),vec3f(1.0,.4,.06),vec3f(.65,.13,.03),age/life);
-    let cool=ramp3(vec3f(.65,.9,1.0),vec3f(.2,.45,1.0),vec3f(.45,.2,.8),age/life);
+    let power=max(.25,p.state.w-1.0);
+    let ember=p.position.w*exp(-age*.65);
+    let warm=ramp3(vec3f(1.0,.65,.12),vec3f(1.0,.19,.015),vec3f(.45,.06,.015),age*.45);
+    let cool=ramp3(vec3f(.25,.85,1.0),vec3f(.08,.3,1.0),vec3f(.28,.1,.65),age*.45);
     var lamp=mix(warm,cool,u);
     if(params.display.x<5.5){lamp=lightPalette(params.display.x,u);}
     let filament=.45+1.5*threads(rnd(id,41u),13.0,6.0);
     // A faint continuous trail makes aiming possible between notes. The captured
     // band level provides the local, lasting light instead of a global music flash.
-    color=(lamp*(.025+ember*.7)+vec3f(1.0,.96,.9)*pow(ember,2.0)*.08)*vary*filament;
+    let core=exp(-age*5.0);
+    color=(lamp*(.12+ember*2.6)+vec3f(.85,.95,1.0)*core*1.8)*vary*filament*(.7+.3*sqrt(power));
+    if(smoke){color=(mix(vec3f(.16,.19,.25),lamp,.55)*2.5+lamp*ember*6.0)*vary*smoothstep(.03,.35,age);}
+    if(spark){color=(lamp*3.0+vec3f(1.0,.95,.85)*1.7)*ember*(.8+seed);}
   } else if (mode < 4.5) {
     // Native-resolution subpixel filaments provide the detail the volumetric grid cannot hold.
     // Lit by the sector it was born in (u is its emission angle), so drifting smoke keeps its band.

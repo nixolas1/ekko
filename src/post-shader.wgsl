@@ -100,6 +100,27 @@ fn bright(c: vec3f) -> vec3f { let clean = smokeContrast(c); return clean * smoo
   // density, rather than putting a uniform haze over sparse, individual particles.
   let overlap = smoothstep(0.16, 1.2, luminance(scene));
   var color = scene * params.extra.z + glow * (params.extra.w * (0.65 + energy * 0.6) + overlap * 0.2) + glare * (0.008 + high * 0.028 + energy * 0.018);
+  if(params.simulation.x>8.5){
+    color+=glow*.24+glare*.035;
+    let world=vec2f((input.uv.x*2.0-1.0)*params.clock.z,1.0-input.uv.y*2.0);
+    // Local casting light stays at the fingertip; smoke and sparks retain their
+    // own birth colour and continue flying when the hand moves or disappears.
+    for(var i=0u;i<9u;i++){
+      let info=params.sourceBands[i];
+      if(info.z<.5 || params.tuning.w<=0.0){continue;}
+      let power=sqrt(info.w);
+      let delta=world-params.sources[i].xy;
+      let r2=dot(delta,delta);
+      let radius=.035+.025*power;
+      let pulse=.9+.1*sin(params.clock.x*11.0+info.x*2.4);
+      var tint=mix(vec3f(1.0,.28,.025),vec3f(.08,.55,1.0),info.x);
+      if(params.display.x<5.5){tint=lightPalette(params.display.x,info.x);}
+      let level=select(.8,.35+info.y*.8,params.simulation.y>.5)*min(params.tuning.w,1.0);
+      let core=exp(-r2/(radius*radius*.065));
+      let halo=exp(-r2/(radius*radius*3.0));
+      color+=(vec3f(.8,.93,1.0)*core*3.5+tint*halo*.28*params.tuning.z)*level*pulse;
+    }
+  }
   if (params.simulation.x > 4.5 && params.simulation.x < 5.5 && params.simulation.y > 0.5) {
     let bass = pow(clamp(params.sound.x, 0.0, 1.0), 1.7);
     let flare = bass * 0.18 + high * 0.22 + params.simulation.z * 0.15;

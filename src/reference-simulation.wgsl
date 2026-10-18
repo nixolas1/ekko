@@ -369,6 +369,7 @@ fn simulateReference(id: u32, old: Particle) -> Particle {
 
 // Mode 9: moving sources. Birth position, aim, band and glow are captured;
 // moving or losing a hand cannot teleport or re-light smoke already in flight.
+// state.w stores 1 + birth power (the positive value also marks initialization).
 fn simulateHandFire(id: u32, old: Particle) -> Particle {
   let dt=params.clock.y;
   let t=params.clock.x;
@@ -385,20 +386,31 @@ fn simulateHandFire(id: u32, old: Particle) -> Particle {
     if(count==0u){return p;}
     let source=id%count;
     let info=params.sourceBands[source];
-    let band=info.y;
+    // Lift quieter mids before the cubic curve: 25% mid activity roughly matches
+    // 90% bass activity, while absent mids still produce only the idle stream.
+    let mid=smoothstep(0.0,.5,info.x)*(1.0-smoothstep(.5,1.0,info.x));
+    let treble=smoothstep(.5,1.0,info.x);
+    let band=clamp(mix(info.y,sqrt(info.y)*1.8,mid)+info.y*treble*.8,0.0,1.0);
     let music=params.simulation.y>.5;
     let response=select(1.0,emissionMultiplier(band,params.ringLevels[2].y),music);
-    let rate=select(.2,.025+pow(band,3.0)*.32,music)*params.tuning.w*response;
+    let power=clamp(info.w,.25,4.0);
+    let pulse=.75+.7*pow(.5+.5*sin(t*11.0+info.x*2.4),4.0);
+    let rate=select(.38,(.045+pow(band,3.0)*.55)*(1.0+treble*band*.75),music)*params.tuning.w*response*power*pulse;
     let key=id ^ pcg(u32(t*1000.0));
     if(rnd(key,63u)>=1.0-exp(-rate*dt)){return p;}
     let emitter=params.sources[source];
     let aim=vec3f(emitter.zw,0.0);
     let basis=refBasis(aim);
     let angle=rnd(id,41u)*TAU;
-    let offset=(basis[0]*cos(angle)+basis[1]*sin(angle))*.055;
+    // The same bass envelope widens every source, regardless of its own band.
+    // Apply it only at birth so a new beat never teleports existing particles.
+    let bass=select(0.0,clamp(max(params.ringLevels[0].x,params.ringLevels[0].y)*.65+max(params.ringAttacks[0].x,params.ringAttacks[0].y)*.85,0.0,1.0),music);
+    let width=1.0+bass*3.5;
+    let radial=basis[0]*cos(angle)+basis[1]*sin(angle);
+    let offset=radial*(.018+.014*sqrt(power))*sqrt(rnd(id,73u))*width;
     // Warm-to-icy hue follows this source's band; brightness belongs to this note.
-    let glow=select(.32,band,music);
-    p=Particle(vec4f(vec3f(emitter.xy,0.0)+offset,glow),vec4f(aim*.55,params.burst.z),vec4f(emitter.xy,9.0,1.0),vec4f(info.x,0.0,emitter.zw));
+    let glow=select(.65,.28+band*.85,music);
+    p=Particle(vec4f(vec3f(emitter.xy,0.0)+offset,glow),vec4f(aim*(1.8+.45*sqrt(power))+radial*bass*.65,params.burst.z),vec4f(emitter.xy,9.0,1.0+power),vec4f(info.x,0.0,emitter.zw));
   }
   p.extra.y+=dt;
   let age=p.extra.y;
@@ -406,10 +418,22 @@ fn simulateHandFire(id: u32, old: Particle) -> Particle {
   let q=p.position.xyz;
   let carried=q-aim*t*.12;
   let curls=refWaves(carried,t*.35,4.5,6u,31.0).curl*.27+refWaves(carried,t*.6,11.0,4u,41.0).curl*.07;
-  let bundle=RefBundle(vec3f(p.state.xy,0.0)+aim*.32,normalize(aim+vec3f(0.0,0.0,.6)),vec2f(.18,.2));
-  let rolling=refRing(q,bundle,.25,select(1.6,-1.6,p.extra.x>.5));
-  let desired=(aim*.18+rolling)*(1.0+p.position.w*.4)+curls*smoothstep(0.0,.9,age)*params.tuning.y+vec3f(0.0,.012*age,0.0);
-  var v=mix(p.velocity.xyz,desired,1.0-exp(-dt*4.0));
+  let power=max(.25,p.state.w-1.0);
+  let kind=rnd(id,75u);
+  let side=vec3f(-aim.y,aim.x,0.0);
+  let phase=rnd(id,41u)*TAU+age*9.0;
+  let spiral=(side*cos(phase)+vec3f(0.0,0.0,sin(phase)))*(.12+.12*sqrt(power));
+  // A fast coherent jet, a slower rolling smoke wake, and sparse ballistic sparks.
+  var desired=aim*(.85+.55*rnd(id,76u)+.35*sqrt(power))+spiral+curls*smoothstep(.05,.7,age)*params.tuning.y*1.5;
+  var drag=3.0;
+  if(kind<.25){
+    desired=aim*(.35+.3*rnd(id,76u))+curls*3.6*params.tuning.y+side*sin(phase)*.32+vec3f(0.0,.08+.035*age,0.0);
+    drag=1.7;
+  }else if(kind>.94){
+    desired=aim*(1.6+rnd(id,76u)*1.2)+side*(rnd(id,77u)-.5)*1.7+vec3f(0.0,-age*.32,0.0);
+    drag=1.8;
+  }
+  var v=mix(p.velocity.xyz,desired,1.0-exp(-dt*drag));
   for(var j=0u;j<min(u32(params.display.w),32u);j++){
     let f=params.forces[j];
     if(f.w<0.0){continue;}

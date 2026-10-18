@@ -48,7 +48,7 @@ The scene also animates without audio. Opening a saved link or reloading keeps m
 | **Smoke light · Original** | Rising, folded sheets of luminous particles. Seven frequency bands feed the emitter; the music can also flash across smoke already in the air. |
 | **Fluid smoke** | Buoyant smoke you can stir. Bass hits fire upward on the left, while higher notes feed the lanes to the right. |
 | **Fire & ice** | Two rolling vortex bundles, warm and cool in the matching palette. Streams curl, fold and meet as the music and your hands disturb them. |
-| **Hand fire & ice** | Emit curling smoke from active hands and the mouse. Only pointing hands emit; other gestures keep their usual forces. Each source reacts to a separate spectrum position, with glow captured at birth and carried into the trail. |
+| **Hand fire & ice** | Cast bright energy jets with sparks and a rolling smoke wake. Point to aim; move closer for more particles or farther away for a gentler stream. Other gestures keep their usual forces. Music pulses each source independently. |
 | **Spectral smoke** | A full-circle spectrum of fine filaments inside softly shaded volumetric smoke. Nine frequency sectors control emission and lighting. |
 | **Particle ring** | Outward streams of particles that accelerate with bass intensity. Pull and push the ring with your hands or mouse. |
 | **Airbender** | A persistent cloud of particles. Gather them into an orbit, drag them across the screen, then send them flying. |
@@ -73,7 +73,7 @@ In **Fluid smoke settings**, turn on **Remove walls** to let smoke flow through 
 
 These are screenshots of the running app, captured at 1920 × 1080 with music playing and controls hidden. The gallery uses higher particle counts and boosted glow/audio response; it shows live output, not prerendered artwork. See [capture settings](docs/images/captures.json) for the selected frames.
 
-In **Hand fire & ice**, one source gets bass. Two span bass and treble; more are spaced evenly across the nine measured frequency bands (up to eight hands plus the mouse). Intermediate positions blend neighbouring bands. Tracking IDs keep assignments stable when hands cross; adding or removing a source redistributes the spectrum. Move the mouse to aim; after five seconds idle it hides and stops emitting. Leaving the scene or holding a mouse button also stops its source. Only an index-finger pointing gesture emits from a hand. Fists, open palms, pinches and two-finger poses retain Gather, Push, Wand and Vortex interactions. A faint idle trail stays visible between notes; each note controls the amount and carried glow of new smoke. Existing trails fade naturally when a source moves or disappears. Use Speed, Turbulence, Glow, Emission amount and Spectrum emission to tune this mode.
+In **Hand fire & ice**, one source gets bass. Two hands take bass and mid; an additional mouse source takes treble. Hands have priority over the mouse. With more sources, assignments span the nine measured frequency bands (up to eight hands plus the mouse). Intermediate positions blend neighbouring bands. Tracking IDs keep assignments stable when hands cross; adding or removing a source redistributes the spectrum. Move the mouse to aim; after five seconds idle it hides and stops emitting. Leaving the scene or holding a mouse button also stops its source. Only an index-finger pointing gesture emits from a hand. Fists, open palms, pinches and two-finger poses retain Gather, Push, Wand and Vortex interactions. A gentler stream stays visible between notes; each note controls the amount and carried glow of new particles. Existing trails fade naturally when a source moves or disappears. Midrange emission lifts quieter notes so roughly 25% mid activity produces a similar stream to 90% bass activity. Treble emission also has extra sensitivity and particle output. Bass hits widen every source at birth, including mid and treble streams; existing trails continue undisturbed. Use Speed, Turbulence, Glow, Emission amount and Spectrum emission to tune this mode.
 
 ## Shape it with your hands
 
@@ -96,7 +96,7 @@ The app attempts to start the camera after WebGPU initialises, subject to browse
 
 Hand detection runs locally in a MediaPipe worker, with smoothing and bounded prediction to keep movement responsive between tracking results. Camera frames are neither uploaded nor saved by the app.
 
-In Hand fire & ice, pointing emits smoke instead of forming a cursor obstacle; all other gestures work as above.
+In Hand fire & ice, pointing casts energy jets instead of forming a cursor obstacle; all other gestures work as above. Camera distance uses the same gesture-start reference and smoothed ¼×–4× power range as the pointing obstacle. Power changes the particle birth rate, jet speed and casting glow; it never increases the allocated particle pool. Each particle keeps its birth power and colour as it flies. The smoke wake uses soft drifting particles, alongside fine energy filaments and sparse ballistic sparks.
 
 ## Let the music drive it
 
@@ -271,7 +271,7 @@ Start with [common-shader.wgsl](src/common-shader.wgsl) for the shared layout an
 
 `npm run lint:wgsl` validates every assembled shader module with Naga, checks browser-required logical grouping, and reports original source filenames and line numbers. It runs before every production build and during shader hot reloads in Vite; invalid shader edits are rejected before reload. No browser or GPU is needed for this check.
 
-`node tests/hand-fire.browser.mjs` checks source-local bass/treble emission, moving-source continuity, carried glow, source loss, pause and nine simultaneous sources with real GPU readback.
+`node tests/hand-fire.browser.mjs` checks source-local bass/treble emission, distance-controlled particle counts, moving-source continuity, captured power and glow, source loss, pause and nine simultaneous sources with real GPU readback. It captures far, near and moving-source previews. Set `EKKO_FIRE_STRESS=1` to also measure a 2.1-million-particle run.
 
 `npm test` runs the Node suite, including shader-validation regression tests, mathematical models and mock WebGPU scheduling checks. It does **not** execute the shaders on a GPU. For real GPU checks, serve the app and open the relevant fixture. `node tests/spectrum-emission.browser.mjs` measures emission at low/high activity in all seven supported modes and checks left/right pressure symmetry. `node tests/fluid-boundaries.browser.mjs` checks open-edge flow, disappearing dye and the saved toggle. Other fixtures:
 

@@ -40,7 +40,7 @@ struct Parameters {
   mouse: vec4f, // world xy, radius, active
   tuning: vec4f, // speed, turbulence, glow, emission
   sources: array<vec4f,9>, // xy origin, zw unit aim
-  sourceBands: array<vec4f,9>, // band position, level, active, reserved
+  sourceBands: array<vec4f,9>, // band position, level, active, gesture-relative power
 }
 // Shader mode numbers differ from the UI's flowMode: 0 sculpture, 1 persistent,
 // 2 fluid smoke, 3 particle ring, 4 spectral volume, 5 plume, 6 twin vortices,
