@@ -55,5 +55,21 @@
     "mode": "Smoke light \u00b7 Original",
     "audio": "Built-in generated score: First light",
     "recreate": "Start Take the tour, choose chapter 2, and let it run for about 4 seconds. Simulated Wand controls and automatic particle quality are active."
+  },
+  "remixTemplates": {
+    "files": [
+      "remix-plume-glow.jpg",
+      "remix-ring.jpg",
+      "remix-persistent.jpg",
+      "remix-sculpture.jpg"
+    ],
+    "captured": "2026-10-18",
+    "viewport": [
+      1440,
+      1000
+    ],
+    "capture": "Live preview canvas only; JPEG quality 90, no post-processing",
+    "audio": "Built-in generated score: First light",
+    "recreate": "Open /remix/edit/?template=<mode>, Run scene, Play demo music, wait about 6.5 seconds. Settings and WGSL are in src/remix/templates.js. Exact simulation frames vary."
   }
 }

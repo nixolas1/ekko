@@ -8,7 +8,7 @@ EKKO is an interactive music visualizer built with WebGPU. Bass launches jets of
 
 *Smoke light · Original — a million particles turning the audio spectrum into luminous, folded ribbons.*
 
-[Guided tour](#take-the-guided-tour) · [Get started](#run-locally) · [Visual modes](#choose-your-scene) · [Hand controls](#shape-it-with-your-hands) · [Music](#let-the-music-drive-it) · [How WebGPU works](#how-webgpu-powers-ekko) · [Developer guide](#explore-the-code)
+[Remix Studio](#remix-studio-gallery-and-ai-agents) · [Guided tour](#take-the-guided-tour) · [Get started](#run-locally) · [Visual modes](#choose-your-scene) · [Hand controls](#shape-it-with-your-hands) · [Music](#let-the-music-drive-it) · [How WebGPU works](#how-webgpu-powers-ekko) · [Developer guide](#explore-the-code)
 
 ## Take the guided tour
 
@@ -267,6 +267,29 @@ The fluid implementation follows the grid-fluid approach demonstrated by [Sebast
 
 The gallery in `docs/images/` contains captures of EKKO itself. Temporary test captures and external reference assets remain excluded from Git.
 
-## Planned mode editor and sharing
+## Remix Studio, gallery and AI agents
 
-Custom WGSL modes, remixing and cloud saves are not implemented yet. The selected storage direction is Neon Postgres, with Vercel Blob for preview images if needed. See the [storage decision](docs/storage.md) for the inactivity requirement and provider references.
+Choose **Remix studio** from the visualizer header. The studio has its own interface and URLs:
+
+- `/remix/` — nine starter scenes, local drafts and the public gallery.
+- `/remix/edit/` — live preview, mode settings and a WGSL editor.
+- `/remix/<id>/` — a saved scene and its revision history.
+- `/remix/agent/` — instructions for creating scenes with an external coding agent.
+
+Start from a template, choose a base mode and edit `remixForce` or `remixColor`. Press **Run changes** to compile. The first function adds particle drift; the second changes the finished colour or draws a procedural image. Fluid smoke and Fluid ring retain their fluid velocity grid and use the colour hook. Demo music, local music files and mouse forces are available in the preview. Camera tracking and the guided hand tour remain in the main visualizer.
+
+The editable WGSL surface supports math and simple conditionals, with a 12,000-character limit. It does not support loops, extra functions, custom bindings or texture access. Compile errors show source line numbers and leave the last working pipeline active. Shared scenes require an explicit Run action.
+
+Drafts autosave in this browser, including unfinished code. **Export JSON** and **Import a remix** move copies between devices. **Save unlisted link** stores a scene in Neon without adding it to the gallery. Anyone with that viewing link can read and fork it. **Publish to gallery** makes it discoverable. Owners can remove a scene from the gallery while preserving its unlisted link and history.
+
+Editing is based on a private link, not an account in this release. Its secret fragment is imported into browser storage and removed from the address bar. Keep the private link to edit from another browser; the public viewing link grants no write access. Display names are self-reported. Each save creates a revision, and concurrent edits are rejected instead of silently overwritten. A scene supports up to 100 revisions; fork it to continue.
+
+**Ask an AI** copies a brief containing the current document and API guide. A coding agent can fetch a scene, edit its code, create an unlisted preview and inspect it using browser tools. A private editing link also permits saving revisions. Gallery publication remains a separate action. EKKO does not send code to an AI provider or require an AI subscription; a hosted MCP server is not included.
+
+See the [agent guide](public/remix-guide.md), [OpenAPI specification](public/remix-openapi.json) and [storage setup](docs/storage.md). The API is `/api/remixes`; `?action=schema` returns modes and the identity shader. Thumbnails are small WebP images captured from the live preview and stored with the scene. Music files are never uploaded as part of a remix.
+
+### Developing the studio
+
+The Vite development and preview servers expose the same API handler as Vercel. Set `DATABASE_URL` in a git-ignored `.env.local`, then run `npm run db:migrate` once to create the tables. Without that variable, local drafts, import/export and shader previews work; cloud operations return an explicit unavailable state.
+
+`npm test` covers document validation, shader boundaries, unfinished drafts and API errors/ownership. `node --env-file=.env.local tests/remix.browser.mjs` checks real Chrome WebGPU compilation and real Neon create/save/publish flows. It creates temporary test records and deletes only those records afterward. Set `EKKO_TEST_URL` to target another local server.

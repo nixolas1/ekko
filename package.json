@@ -8,10 +8,12 @@
     "dev": "vite --host 127.0.0.1",
     "build": "npm run assets && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "db:migrate": "node --env-file=.env.local scripts/migrate-remixes.mjs"
   },
   "dependencies": {
-    "@mediapipe/tasks-vision": "0.10.35"
+    "@mediapipe/tasks-vision": "0.10.35",
+    "@neondatabase/serverless": "^1.2.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.1",

@@ -6,6 +6,7 @@ import volumeCode from './volume.wgsl?raw';
 import referenceSimulation from './reference-simulation.wgsl?raw';
 import referenceRenderCode from './reference-render.wgsl?raw';
 import {FluidSmoke} from './fluid.js';
+import {remixSources} from './remix/shader.js';
 const MAX_PARTICLES=3145728,PARTICLE_BYTES=64,MAX_FORCES=32,MAX_BURSTS=8,MAX_QUEUE=64;
 // Spectral smoke volume: grid mirrors VX/VY/VZ in volume.wgsl. At most VOLUME_SPLATS particles are splatted per
 // frame (every stride-th one, weighted up), which bounds both the atomic cost and the fixed point range.
@@ -83,6 +84,32 @@ export class ParticleEngine {
     await this.buildVolume(volume,post);
     this.fluid=new FluidSmoke(this);await this.fluid.init();
     this.resize(true);
+  }
+  // Compile both editable hooks before replacing either pipeline. The existing
+  // bind groups are rebuilt only after success; failed edits leave the live scene intact.
+  async compileRemix(source) {
+    const code=remixSources(source,computeCode+'\n'+referenceSimulation,postCode),device=this.device;
+    const lines=source.split('\n').length;
+    device.pushErrorScope('validation');
+    let nextCompute,nextComposite,failure;
+    try {
+      const compile=async(text)=>{
+        const module=device.createShaderModule({code:PREFIX+text});
+        const errors=(await module.getCompilationInfo()).messages.filter(m=>m.type==='error');
+        if(errors.length)throw new Error(errors.map(e=>{const line=e.lineNum-PREFIX_LINES;return `${line>0&&line<=lines?'Line '+line:'Shader'}: ${e.message}`;}).join('\n'));
+        return module;
+      };
+      const [compute,post]=await Promise.all([compile(code.compute),compile(code.post)]);
+      [nextCompute,nextComposite]=await Promise.all([
+        device.createComputePipelineAsync({layout:'auto',compute:{module:compute,entryPoint:'simulate'}}),
+        device.createRenderPipelineAsync({layout:'auto',vertex:{module:post,entryPoint:'fullscreenVertex'},fragment:{module:post,entryPoint:'compositeFragment',targets:[{format:navigator.gpu.getPreferredCanvasFormat()}]},primitive:{topology:'triangle-list'}}),
+      ]);
+    } catch(error) { failure=error; }
+    const validation=await device.popErrorScope();
+    if(failure||validation)throw failure||new Error(validation.message);
+    this.compute=nextCompute;this.compositePipeline=nextComposite;
+    this.computeGroup=device.createBindGroup({layout:this.compute.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:this.buffer}},{binding:1,resource:{buffer:this.uniform}},{binding:2,resource:{buffer:this.density}}]});
+    this.buildTargets();
   }
   // Grid-sized resources are independent of the canvas; the raymarch targets are made in buildVolumeTargets().
   async buildVolume(volume,post) {
