@@ -6,7 +6,7 @@
   "functions": {
     "api/youtube.py": {
       "maxDuration": 60,
-      "excludeFiles": "{public/**,src/**,tests/**,scripts/**,references/**}"
+      "excludeFiles": "{public/**,dist/**,node_modules/**,src/**,tests/**,scripts/**,references/**}"
     }
   },
   "rewrites": [
