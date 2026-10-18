@@ -196,3 +196,53 @@ test('invalid hand landmarks produce no forces',()=>{
   const bad=pinch();bad[4].x=NaN;
   const f=new HandForces();feed(f,repeat([bad,hand().slice(0,12)],12));assert.equal(f.states.size,0);
 });
+
+test('pointing size follows camera distance relative to gesture start and composes with the slider',()=>{
+  for(const aspect of [1,4/3,16/9])for(const initial of [.06,.12,.2]){
+    const f=new HandForces();let time=1000;
+    const move=(palm,n=30)=>{const run=feed(f,repeat(hand({up:ONE,palm,aspect}),n),{start:time,aspect});time=run.end;return run.samples.at(-1)[0];};
+    assert(near(move(initial).pointDepthScale,1));
+    const closer=move(initial*1.6);
+    assert(near(closer.pointDepthScale,1.6**2,.001));
+    assert(near(handForce(closer,false,1,1,1.5)[3],-.18*1.5*1.6**2,.001));
+    assert(near(move(initial*.65).pointDepthScale,.65**2,.001));
+    assert(near(move(initial).pointDepthScale,1,.001));
+    assert(near(move(initial*4).pointDepthScale,4,.001));
+    assert(near(move(initial*.1).pointDepthScale,.25,.001));
+  }
+});
+
+test('pointing reference starts before debounce, smooths depth changes, and ignores rotation and translation',()=>{
+  const f=new HandForces(),first=hand({up:ONE,palm:.1});
+  const initial=feed(f,[first,...repeat(hand({up:ONE,palm:.15}),30)]);
+  assert(near(initial.samples.at(-1)[0].pointDepthScale,1.5**2,.001));
+  const moved=feed(f,repeat(hand({up:ONE,palm:.15,x:.4,y:.5,angle:1,mirror:true}),20),{start:initial.end});
+  assert(near(moved.samples.at(-1)[0].pointDepthScale,1.5**2,.001));
+  const step=feed(f,[hand({up:ONE,palm:.2})],{start:moved.end}).samples[0][0];
+  assert(step.pointDepthScale>1.5**2&&step.pointDepthScale<3,'depth changes are smoothed');
+});
+
+test('pointing depth reference survives brief noise but resets after a new gesture or tracking loss',()=>{
+  for(const interruption of ['gesture','missing','stalled']){
+    const f=new HandForces();
+    let run=feed(f,[...repeat(hand({up:ONE,palm:.1}),12),...repeat(hand({up:ONE,palm:.16}),30)]);
+    run=feed(f,[hand({up:TWO,palm:.16}),...repeat(hand({up:ONE,palm:.16}),12)],{start:run.end});
+    assert(near(run.samples.at(-1)[0].pointDepthScale,1.6**2,.001));
+    if(interruption==='gesture')run=feed(f,repeat(hand({up:FIST,palm:.16}),12),{start:run.end});
+    else if(interruption==='missing')run=feed(f,repeat([],12),{start:run.end});
+    else run.end+=1000;
+    const restarted=feed(f,repeat(hand({up:ONE,palm:.16}),15),{start:run.end}).samples.at(-1)[0];
+    assert(near(restarted.pointDepthScale,1),interruption);
+  }
+});
+
+test('two pointing hands keep independent depth references when detections reorder',()=>{
+  const f=new HandForces();
+  const initial=feed(f,repeat({hands:[hand({up:ONE,palm:.1}),hand({up:ONE,palm:.2})],ids:[4,9]},12));
+  const frames=Array.from({length:30},(_,i)=>{
+    const a=hand({up:ONE,palm:.15}),b=hand({up:ONE,palm:.12});
+    return i%2?{hands:[a,b],ids:[4,9]}:{hands:[b,a],ids:[9,4]};
+  });
+  const byId=Object.fromEntries(feed(f,frames,{start:initial.end}).samples.at(-1).map(s=>[s.id,s]));
+  assert(near(byId[4].pointDepthScale,1.5**2,.001));assert(near(byId[9].pointDepthScale,.6**2,.001));
+});

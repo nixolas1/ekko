@@ -175,8 +175,8 @@ async function toggleAudio(){
   }catch(error){notice(error.message);}finally{if(token===transportToken){transportBusy=false;audioUI();persist();}}
 }
 $('track-play').onclick=toggleAudio;
-// Known music-video links reuse the recordings already hosted with permission.
-const youtubeLibrary={'fpViZkhpPHk':'mitis-endeavors','lI5m0-oc9lI':'mitis-shattered','waOuUycRRYs':'mitis-wilderness','-1jPUB7gRyg':'aqua-doctor-jones','Jo2PuYWaNH8':'polyphony-mc-nugget-yodel'};
+// Known music-video links reuse the installed library recordings.
+const youtubeLibrary=Object.fromEntries(LOCAL_TRACKS.filter(track=>track.youtube).map(track=>[track.youtube,track.id]));
 let youtubeAbort=null;
 $('youtube-button').onclick=()=>{if(audioSelection.kind==='youtube')return;audioRevision++;sound.stop();audioSelection={...audioSelection,kind:'youtube',position:0,playing:false};$('youtube-url').value=audioSelection.youtube||'';audioUI();persist();};
 async function loadYouTube({position=0}={}){

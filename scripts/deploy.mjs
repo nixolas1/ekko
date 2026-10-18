@@ -12,7 +12,7 @@ export async function copyLibrary(root, destination) {
   for(const file of files){
     const path=join(root,file);
     const info=await stat(path).catch(()=>null);
-    if(!info?.isFile()||info.size===0)throw new Error(`Missing library asset: ${file}. Restore all five songs before deploying.`);
+    if(!info?.isFile()||info.size===0)throw new Error(`Missing library asset: ${file}. Restore all library songs before deploying.`);
   }
   for(const file of files){
     await mkdir(join(destination,'public/audio'),{recursive:true});

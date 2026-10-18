@@ -12,7 +12,7 @@ test('release package includes every Git-ignored library file and excludes unrel
   await mkdir(join(root,'public/audio'),{recursive:true});
   for(const track of LOCAL_TRACKS)await writeFile(join(root,'public',track.src),track.id);
   await writeFile(join(root,'public/audio/unlisted.webm'),'unlisted');
-  const files=await copyLibrary(root,destination);assert.equal(files.length,5);
+  const files=await copyLibrary(root,destination);assert.equal(files.length,LOCAL_TRACKS.length);
   for(const track of LOCAL_TRACKS)assert.equal(await readFile(join(destination,'public',track.src),'utf8'),track.id);
   await assert.rejects(stat(join(destination,'public/audio/unlisted.webm')),{code:'ENOENT'});
  }finally{await rm(root,{recursive:true,force:true});}

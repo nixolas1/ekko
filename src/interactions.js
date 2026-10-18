@@ -5,6 +5,10 @@ const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 const FINGER=['point','wand','vortex'];
 // Signed force of each finger gesture; fist/open palm keep the openness-scaled 12..18.
 const TARGET={point:0,wand:14,vortex:16};
+// Palm bones estimate camera distance without depending on finger extension.
+// Include landmark depth (in x units) to reduce changes when the hand tilts.
+const palmSize=(hand,aspect)=>[5,9,17].reduce((sum,i)=>sum+Math.hypot(
+  (hand[i].x-hand[0].x)*aspect,hand[i].y-hand[0].y,((hand[i].z||0)-(hand[0].z||0))*aspect),0)/3;
 const expires=s=>Math.min(s.time+Math.max(300,s.motion.motion.interval*3),s.missingAt==null?Infinity:s.missingAt+300);
 const DEFAULTS={
   enter:180,            // ms a point, pinch or vortex must hold before activation
@@ -27,6 +31,7 @@ export class HandForces {
       let old=this.states.get(id);
       if(old?.missingAt!=null&&time-old.missingAt>=300)old=undefined;
       if(old&&captured<=old.captured)return;
+      const depthReset=old&&time>=expires(old);
       const motion=old?.motion||new HandMotion();motion.update(hand,time,aspect,captured);
       const level=openness(hand,aspect);
       const dt=old?Math.max((captured-old.captured)/1000,.008):.05;
@@ -46,11 +51,24 @@ export class HandForces {
       }
       // Debounce per hand; unsupported poses settle to no force.
       let {candidate=shape.gesture,since=captured,stable=null}=old||{};
-      if(old&&shape.gesture!==candidate){candidate=shape.gesture;since=captured;}
+      const palm=palmSize(hand,aspect);
+      let candidatePalm=depthReset?palm:old?.candidatePalm??palm;
+      if(old&&shape.gesture!==candidate){candidate=shape.gesture;since=captured;candidatePalm=palm;}
       if(candidate!==stable&&captured-since>=(FINGER.includes(candidate)?o.enter:o.exit))stable=candidate;
+      // Capture the first observation of a confirmed pointing gesture, rather
+      // than drifting the reference as the hand moves. Brief pose noise keeps it.
+      const pointReference=stable==='point'?(!depthReset&&old?.stable==='point'?old.pointReference:candidatePalm):null;
+      let pointDepthScale=depthReset?1:old?.pointDepthScale??1;
+      if(stable!=='point')pointDepthScale=1;
+      else if(shape.gesture==='point'&&pointReference>.001){
+        // Amplify movement in both directions while keeping the starting size at 1×.
+        const target=clamp((palm/pointReference)**2,.25,4);
+        pointDepthScale+=(target-pointDepthScale)*(1-Math.exp(-dt/.08));
+      }
       this.states.set(id,{id,motion,mapPoint,missingAt:null,x,y,rawX:x,rawY:y,vx,vy,open,mode,palmStrength:mode*(12+Math.abs(open-.5)*12),captured,time,
         renderX:old?.renderX??x,renderY:old?.renderY??y,renderAt:old?.renderAt??time,
         vortexTips:shape.gesture==='vortex'?shape.tips:old?.vortexTips||[8,12],fingers:shape.count,candidate,since,stable,vortexRadius,
+        candidatePalm,pointReference,pointDepthScale,
         wandWeight:old?.wandWeight??0,vortexWeight:old?.vortexWeight??0,pointWeight:old?.pointWeight??0,weightAt:old?.weightAt??time});
     });
     for(const [id,state] of this.states)if(!found.has(id)){
@@ -93,7 +111,7 @@ export class HandForces {
 // Negative radius marks a cursor obstacle in the shared GPU force buffer.
 // Each pointing hand gets its own obstacle, independent of the mouse cursor.
 export function handForce(hand,persistent,pullPower,pushPower,pointSize=1){
-  if(hand.gesture==='point')return [hand.x,hand.y,(hand.point||0)*pushPower,-.18*clampPointSize(pointSize),0,0,hand.id,0,0];
+  if(hand.gesture==='point')return [hand.x,hand.y,(hand.point||0)*pushPower,-.18*clampPointSize(pointSize)*clamp(hand.pointDepthScale??1,.25,4),0,0,hand.id,0,0];
   const wand=hand.wand||0,vortex=hand.vortex||0;
   const radius=(persistent?.95:.65)*Math.max(0,1-wand-vortex)+.22*wand+(hand.vortexRadius||.35)*vortex;
   return [hand.x,hand.y,hand.strength*(hand.strength<0?pushPower:pullPower),radius,wand,vortex,hand.id,hand.vx,hand.vy];

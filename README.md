@@ -81,7 +81,7 @@ Camera tracking turns hand landmarks into forces in the simulation. The preview 
 
 | Gesture | Action |
 | --- | --- |
-| Raise your index finger | **Cursor:** gently repel nearby particles and smoke at your fingertip, just like hovering the mouse. |
+| Raise your index finger | **Cursor:** gently repel nearby particles and smoke at your fingertip. Move closer to the camera to grow the effect, or farther away to shrink it (a quarter to four times the selected pointing size). Each new pointing gesture resets the distance reference. |
 | Pinch thumb and index fingertips together | **Wand:** gather light into a small moving core at the pinch. |
 | Raise index and middle fingers | **Vortex:** stir an orbit. Spread the fingertips to widen it. |
 | Close your hand | **Gather:** pull particles into orbit. |
@@ -242,9 +242,9 @@ The previous production check on **18 October 2026** recorded `503 youtube-block
 
 ## Deploy the existing site
 
-Run `npm run deploy` from the linked Vercel checkout after committing the changes. It packages the current Git commit and explicitly copies the five library recordings from `public/audio/`. It stops before deployment if any song is missing or empty. Keep the local `.vercel/project.json` link available.
+Run `npm run deploy` from the linked Vercel checkout after committing the changes. It packages the current Git commit and explicitly copies all catalogue recordings from `public/audio/`. It stops before deployment if any song is missing or empty. Keep the local `.vercel/project.json` link available.
 
-The songs are Git-ignored, so a Git-only archive or Git-triggered build does not include them. After deployment, check all five `/audio/` URLs and browser playback as well as the visualizer.
+The songs are Git-ignored, so a Git-only archive or Git-triggered build does not include them. After deployment, check every catalogue `/audio/` URL and browser playback as well as the visualizer.
 
 ## Explore the code
 

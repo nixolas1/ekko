@@ -55,3 +55,33 @@ Korrigering 17. oktober 2026: Hermes House Band-versjonen er en danseversjon av 
 Kanalnavn, kanal-id, verifiseringsstatus og opplastingsdato er lest fra YouTube-metadata med yt-dlp. Nedlastingsmetoden er den samme som for Endeavors: ordinær yt-dlp fra `/tmp/ekko-media-tools`, Node som JS-runtime, format 251 (Opus i WebM), uten cookies, innlogging eller omgåelse av tilgangskontroll. Det er ikke gjort noen konvertering, fordi ffmpeg er ødelagt. Alle filene ligger lokalt, så lydanalysen virker på dem. Ingen eksterne strømmer brukes.
 
 Rettigheter: Filene er kun til lokal demonstrasjon, etter brukerens tillatelse. `public/audio/` er ignorert av Git. **Vite kopierer filene til `dist/audio/` ved bygging**, så de må fjernes eller lisensieres før offentlig bygg eller utstilling. Det er ikke hevdet noen rett til viderepublisering, og ingenting er publisert. Kreditering i appen er en kildelenke per låt (`data-track-credit` i `index.html`), ikke en lisens.
+
+## Catalogue additions — 18 October 2026
+
+Added at the user’s request using yt-dlp 2026.08.19 with Node, audio-only format 251 (Opus/WebM). These additions were downloaded locally; no production deployment was performed. Source metadata was checked against artist or label uploads. The recordings remain Git-ignored.
+
+| Track | YouTube source | Duration | Local file |
+| --- | --- | --- | --- |
+| DJ Shadow — Scale It Back (feat. Little Dragon) | [djshadow](https://www.youtube.com/watch?v=NL9ypNz9-mM) | 4:21 | `/audio/dj-shadow-scale-it-back.webm` |
+| Alec Troniq & Gabriel Vitel — Pimpernuckel | [Alec Troniq](https://www.youtube.com/watch?v=VG6ADGAVmDs) | 4:03 | `/audio/alec-troniq-pimpernuckel.webm` |
+| TheFatRat — Unity | [TheFatRat](https://www.youtube.com/watch?v=n8X9_MgEdCg) | 4:09 | `/audio/thefatrat-unity.webm` |
+| Will Sparks — Ah Yeah! | [TMRW Music](https://www.youtube.com/watch?v=VhFvRGK4pVY) | 3:33 | `/audio/will-sparks-ah-yeah.webm` |
+| Otto Knows — Million Voices | [Otto Knows](https://www.youtube.com/watch?v=S8jhXmfdRFY) | 3:09 | `/audio/otto-knows-million-voices.webm` |
+| Jamie xx — Loud Places (feat. Romy) | [Jamie xx](https://www.youtube.com/watch?v=kuOe4haCNgA) | 4:43 | `/audio/jamie-xx-loud-places.webm` |
+| D A N N Y — TAKE ME | [broke records](https://www.youtube.com/watch?v=2YcPf0a4n0Q) | 2:09 | `/audio/danny-take-me.webm` |
+| Felix Da Housecat — Rocket Ride | [Felix Da Housecat](https://www.youtube.com/watch?v=nfKrZbBEKWY) | 2:41 | `/audio/felix-da-housecat-rocket-ride.webm` |
+| Fred again.. & Blanco — solo | [Fred again . .](https://www.youtube.com/watch?v=WgHndN5nThc) | 4:52 | `/audio/fred-again-solo.webm` |
+| Porter Robinson & Madeon — Shelter | [Madeon](https://www.youtube.com/watch?v=HQnC1UHBvWA) | 3:38 | `/audio/porter-robinson-madeon-shelter.webm` |
+| Madeon — Icarus | [Madeon](https://www.youtube.com/watch?v=XHs99iVpnXU) | 3:37 | `/audio/madeon-icarus.webm` |
+| Mansionair — Violet City | [Mansionair](https://www.youtube.com/watch?v=miC82O_a5GI) | 3:29 | `/audio/mansionair-violet-city.webm` |
+| The Acid — Basic Instinct (Thomas Jack Remix) | [Thomas Jack](https://www.youtube.com/watch?v=cd_Kw-CU8fU) | 6:28 | `/audio/the-acid-basic-instinct-thomas-jack.webm` |
+| Guru Josh Project — Infinity 2008 (Klaas Vocal Mix) | [Ultra Records](https://www.youtube.com/watch?v=jzy2dgEUOhY) | 3:14 | `/audio/guru-josh-project-infinity.webm` |
+| deadmau5 & Kaskade — I Remember | [deadmau5](https://www.youtube.com/watch?v=zK1mLIeXwsQ) | 9:54 | `/audio/deadmau5-kaskade-i-remember.webm` |
+| 旱獭乐队 — Ezir-Kara (骏马黑鹰) | [旱獭乐队 - Topic](https://www.youtube.com/watch?v=AAuEAYa19K8) | 2:43 | `/audio/marmota-ezir-kara.webm` |
+| Emma Jensen — Somebody Else (The 1975 cover, P3 Christine Live) | [NRK P3](https://www.youtube.com/watch?v=VxlQG8s24zI) | 3:25 | `/audio/emma-jensen-somebody-else.webm` |
+
+“project guru” is matched to Guru Josh Project; “deadm5us” to deadmau5. “Basic Instinct” is The Acid’s Thomas Jack remix. “Rocket Ride” uses the original, and “I Remember” uses the full-length recording. “Ezir-Kara” uses the exact YouTube recording supplied by the user (AAuEAYa19K8), with artist/title taken from its distribution metadata. “I was dreaming of the past” was omitted at the user’s request.
+
+Emma Jensen’s recording uses the exact video supplied by the user, VxlQG8s24zI. Its YouTube title identifies it as a live cover of The 1975 for P3 Christine Live; the catalogue preserves that version information. Downloaded as format 251 with yt-dlp, without the radio playlist parameters.
+
+The user requested deployment of the expanded catalogue on 18 October 2026. The release packages all 22 installed recordings (the original five plus 17 additions).
